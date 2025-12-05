@@ -71,7 +71,8 @@
   },
   "dependencies": {
     "node-gyp-build": "4.x.x",
-    "throttle-debounce": "5.x.x"
+    "throttle-debounce": "5.x.x",
+    "@nut-tree/nut-js": "file:vendor/nutjs"
   },
   "gypfile": true,
   "engines": {

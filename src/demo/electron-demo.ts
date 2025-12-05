@@ -284,8 +284,11 @@ function createWindow() {
     .log-container {
       background: rgba(0, 0, 0, 0.3);
       border-radius: 6px;
-      height: 120px;
+      max-height: 28vh;
       overflow-y: auto;
+      position: sticky;
+      top: 8px;
+      z-index: 2;
       font-family: 'Menlo', 'Monaco', monospace;
       font-size: 10px;
       padding: 8px;
@@ -576,9 +579,11 @@ function createWindow() {
         <button id="btnRichText">Rich Text Demo</button>
         <button id="btnCopyDemo">Copy Demo</button>
       </div>
-      <div style="display: flex; gap: 4px; margin-top: 6px;">
+      <div style="display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; align-items: center;">
         <input type="text" id="inputMsg" placeholder="Text to simulate..." style="flex: 1;">
-        <button id="btnSendText" class="small">Send</button>
+        <button id="btnSendNut" class="small primary" title="Use nut.js">Send (nut.js)</button>
+        <button id="btnSendApple" class="small" title="Use AppleScript">Send (AppleScript)</button>
+        <button id="btnSendText" class="small" style="display:none"></button>
       </div>
     </div>
   </div>
@@ -629,6 +634,12 @@ function createWindow() {
     let lastTime = Date.now();
     let attachStartTime = 0;
     let hasAttached = false;
+    const attempts = new Map();
+    function setAttempt(id, data) {
+      if (!id) return;
+      const prev = attempts.get(id) || {};
+      attempts.set(id, { ...prev, ...data });
+    }
 
     // FPS Counter
     setInterval(() => {
@@ -785,6 +796,39 @@ function createWindow() {
         }, 1000);
       }
     };
+
+    const btnSendNut = document.getElementById('btnSendNut');
+    const btnSendApple = document.getElementById('btnSendApple');
+    function beginSend(btn) {
+      isSending = true;
+      if (btn) { btn.disabled = true; btn.textContent = '...'; }
+      const warn = document.getElementById('passthroughWarning');
+      if (warn) warn.style.display = 'none';
+    }
+    if (btnSendNut) {
+      btnSendNut.onclick = () => {
+        const text = inputMsg.value;
+        if (!text || isSending) return;
+        beginSend(btnSendNut);
+        log('CMD', 'Starting Rich Text Demo with: ' + (text || 'Auto Text'));
+        try { ipc.send('action', 'send-text-nutjs', text) } catch (err) {
+          log('ERROR', 'Failed to send text via nut.js');
+          isSending = false; btnSendNut.disabled = false; btnSendNut.textContent = 'Send (nut.js)';
+        }
+      };
+    }
+    if (btnSendApple) {
+      btnSendApple.onclick = () => {
+        const text = inputMsg.value;
+        if (!text || isSending) return;
+        beginSend(btnSendApple);
+        log('CMD', 'Starting Copy Demo with: ' + (text || 'Clipboard Test'));
+        try { ipc.send('action', 'send-text-applescript', text) } catch (err) {
+          log('ERROR', 'Failed to send text via AppleScript');
+          isSending = false; btnSendApple.disabled = false; btnSendApple.textContent = 'Send (AppleScript)';
+        }
+      };
+    }
 
     document.getElementById('btnRichText').onclick = () => {
       const text = inputMsg.value || 'Auto Text';
@@ -997,14 +1041,20 @@ function createWindow() {
     ipc.on('text-send', (payload) => {
       isSending = false;
       const btnSendText = document.getElementById('btnSendText');
-      if (btnSendText) {
-        btnSendText.disabled = false;
-        btnSendText.textContent = 'Send';
-      }
+      if (btnSendText) { btnSendText.disabled = false; btnSendText.textContent = 'Send'; }
+      const btnSendNut = document.getElementById('btnSendNut');
+      const btnSendApple = document.getElementById('btnSendApple');
+      if (btnSendNut) { btnSendNut.disabled = false; btnSendNut.textContent = 'Send (nut.js)'; }
+      if (btnSendApple) { btnSendApple.disabled = false; btnSendApple.textContent = 'Send (AppleScript)'; }
+
+      const id = payload && payload.correlationId ? String(payload.correlationId) : ''
+      const idShort = id ? '[' + id.slice(0, 6) + ']' : ''
+      const attempt = attempts.get(id) || {}
+      const method = String((payload && payload.method) || attempt.method || 'unknown')
 
       if (payload && payload.ok) {
-        const method = String(payload.method || 'applescript')
-        log('INPUT', 'Text delivered to TextEdit (' + method + ')')
+        const len = attempt.length || 0
+        log('SEND', idShort + ' ' + method + ' success' + (len ? ' (' + len + ' chars)' : ''))
         
         // Show success toast only after actual completion
         const toastMsg = document.getElementById('toastMsg');
@@ -1017,39 +1067,45 @@ function createWindow() {
         if (inputMsg) inputMsg.value = '';
 
       } else {
-        if (payload && payload.error === 'automation_or_accessibility_denied') {
-          log('ERROR', 'Permission required: enable Automation for this app (TextEdit), and Accessibility for keystrokes')
-        } else if (payload && payload.error === 'nutjs_failed') {
-          log('ERROR', 'nut.js typing failed, ensure Accessibility is enabled and module is compatible')
-        } else {
-          log('ERROR', 'Text delivery failed')
-        }
+        const err = payload && payload.error ? String(payload.error) : 'failed'
+        log('SEND', idShort + ' ' + method + ' failed: ' + err)
       }
+      if (id) attempts.delete(id)
     })
 
     ipc.on('nutjs-status', (payload) => {
       if (!payload || !payload.stage) return
-      
-      const cid = payload.correlationId ? '[' + payload.correlationId.slice(0, 6) + ']' : ''
-      
+      const id = payload.correlationId ? String(payload.correlationId) : ''
       if (payload.stage === 'module-available') {
-        log('NUT', cid + ' nut.js available')
+        setAttempt(id, { method: 'nutjs', available: true })
       } else if (payload.stage === 'module-missing') {
-        const msg = (payload.details && payload.details.message) ? payload.details.message : 'nut.js module missing, using fallback'
-        log('NUT', cid + ' ' + msg)
+        setAttempt(id, { method: 'nutjs-missing' })
       } else if (payload.stage === 'typing-start') {
         const details = payload.details || {}
-        log('NUT', cid + ' Typing started (' + (details.length || 0) + ' chars): ' + (details.preview || ''))
-      } else if (payload.stage === 'typing-success') {
-        const msg = (payload.details && payload.details.message) ? payload.details.message : 'Typing success. Confirmed.'
-        log('NUT', cid + ' ' + msg)
+        setAttempt(id, { length: details.length, preview: details.preview })
+        const method = (attempts.get(id) || {}).method || 'nutjs'
+        const idShort = id ? '[' + id.slice(0, 6) + ']' : ''
+        const len = details.length || 0
+        log('SEND', idShort + ' ' + method + ' start' + (len ? ' (' + len + ' chars)' : ''))
       } else if (payload.stage === 'typing-error') {
-        const msg = String(payload.error || 'unknown error')
-        log('NUT', cid + ' Typing error: ' + msg)
-        if (payload.details && payload.details.stack) {
-          console.error(payload.details.stack)
-        }
+        setAttempt(id, { error: String(payload.error || 'unknown error') })
       }
+    })
+
+    ipc.on('input-method', (payload) => {
+      if (!payload || !payload.method) return
+      const id = payload.correlationId ? String(payload.correlationId) : ''
+      setAttempt(id, { method: String(payload.method) })
+    })
+
+    ipc.on('input-start', (payload) => {
+      if (!payload || !payload.method) return
+      const id = payload.correlationId ? String(payload.correlationId) : ''
+      setAttempt(id, { method: String(payload.method), length: payload.length })
+      const idShort = id ? '[' + id.slice(0, 6) + ']' : ''
+      const method = String(payload.method)
+      const len = payload.length || 0
+      log('SEND', idShort + ' ' + method + ' start' + (len ? ' (' + len + ' chars)' : ''))
     })
 
   </script>
@@ -1265,10 +1321,12 @@ function makeDemoInteractive() {
       (async () => {
         try {
           OverlayController.focusTarget()
-
+          
           // 1. Try Nut.js first (Cross-platform)
           try {
             if (nutService.isAvailable()) {
+              try { window.webContents.send('input-method', { method: 'nutjs', correlationId }) } catch {}
+              try { window.webContents.send('input-start', { method: 'nutjs', correlationId, length: text.length }) } catch {}
               await nutService.typeText(text, correlationId)
               window.webContents.send('text-send', { ok: true, method: 'nutjs', correlationId })
               OverlayController.activateOverlay()
@@ -1278,6 +1336,7 @@ function makeDemoInteractive() {
               // But nutService.typeText throws if missing, so let's just try calling it
               // if we want to rely on its internal check. 
               // However, calling typeText when we know it's missing is cleaner.
+              try { window.webContents.send('input-method', { method: 'nutjs-missing', correlationId }) } catch {}
               await nutService.typeText(text, correlationId)
             }
           } catch (err: any) {
@@ -1301,6 +1360,8 @@ function makeDemoInteractive() {
               `  set existingText to text of front document\n` +
               `  set text of front document to existingText & "${t}"\n` +
               `end tell`;
+            try { window.webContents.send('input-method', { method: 'applescript', correlationId }) } catch {}
+            try { window.webContents.send('input-start', { method: 'applescript', correlationId, length: text.length }) } catch {}
 
             execFile('osascript', ['-e', script], (err: any) => {
               if (err) {
@@ -1311,6 +1372,8 @@ function makeDemoInteractive() {
                   const pasteScript = `tell application "TextEdit" to activate\n` +
                     `delay 0.1\n` +
                     `tell application "System Events" to keystroke "v" using {command down}`
+                  try { window.webContents.send('input-method', { method: 'paste', correlationId }) } catch {}
+                  try { window.webContents.send('input-start', { method: 'paste', correlationId, length: text.length }) } catch {}
                   execFile('osascript', ['-e', pasteScript], (err2: any) => {
                     if (err2) {
                       console.error('Fallback paste failed', err2)
@@ -1332,6 +1395,8 @@ function makeDemoInteractive() {
             const { execFile } = require('node:child_process')
             const cmd = `$ws = New-Object -ComObject WScript.Shell; $ws.SendKeys('^v')`
             clipboard.writeText(text)
+            try { window.webContents.send('input-method', { method: 'paste', correlationId }) } catch {}
+            try { window.webContents.send('input-start', { method: 'paste', correlationId, length: text.length }) } catch {}
             execFile('powershell', ['-NoProfile', '-Command', cmd], (err: any) => {
               if (err) {
                 console.error('Failed to paste on Windows', err)
@@ -1347,6 +1412,85 @@ function makeDemoInteractive() {
           }
         } catch (error) {
           console.error('Error during send-text', error)
+          window.webContents.send('text-send', { ok: false, error: 'exception', correlationId })
+        }
+      })()
+    }
+
+    if (type === 'send-text-nutjs') {
+      const text: string = String(data || '')
+      if (!text.trim()) return
+
+      const correlationId = randomUUID();
+      (async () => {
+        try {
+          OverlayController.focusTarget()
+          if (!nutService.isAvailable()) {
+            window.webContents.send('text-send', { ok: false, error: 'nutjs_missing', correlationId })
+            return
+          }
+          try { window.webContents.send('input-method', { method: 'nutjs', correlationId }) } catch {}
+          try { window.webContents.send('input-start', { method: 'nutjs', correlationId, length: text.length }) } catch {}
+          await nutService.typeText(text, correlationId)
+          window.webContents.send('text-send', { ok: true, method: 'nutjs', correlationId })
+          OverlayController.activateOverlay()
+        } catch (err: any) {
+          const msg = err && err.message ? err.message : 'nutjs_failed'
+          window.webContents.send('text-send', { ok: false, error: msg, correlationId })
+        }
+      })()
+    }
+
+    if (type === 'send-text-applescript') {
+      const text: string = String(data || '')
+      if (!text.trim()) return
+
+      const correlationId = randomUUID();
+      (async () => {
+        try {
+          OverlayController.focusTarget()
+          if (process.platform === 'darwin') {
+            const { execFile } = require('node:child_process')
+            const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+            const t = esc(text)
+            const script = `tell application "TextEdit"\n` +
+              `  activate\n` +
+              `  if (count of windows) = 0 then make new document\n` +
+              `  set existingText to text of front document\n` +
+              `  set text of front document to existingText & "${t}"\n` +
+              `end tell`;
+            try { window.webContents.send('input-method', { method: 'applescript', correlationId }) } catch {}
+            try { window.webContents.send('input-start', { method: 'applescript', correlationId, length: text.length }) } catch {}
+            execFile('osascript', ['-e', script], (err: any) => {
+              if (err) {
+                try {
+                  const { clipboard } = require('electron')
+                  clipboard.writeText(text)
+                  const pasteScript = `tell application "TextEdit" to activate\n` +
+                    `delay 0.1\n` +
+                    `tell application "System Events" to keystroke "v" using {command down}`
+                  try { window.webContents.send('input-method', { method: 'paste', correlationId }) } catch {}
+                  try { window.webContents.send('input-start', { method: 'paste', correlationId, length: text.length }) } catch {}
+                  execFile('osascript', ['-e', pasteScript], (err2: any) => {
+                    if (err2) {
+                      window.webContents.send('text-send', { ok: false, error: 'automation_or_accessibility_denied', correlationId })
+                      return
+                    }
+                    window.webContents.send('text-send', { ok: true, method: 'paste', correlationId })
+                    OverlayController.activateOverlay()
+                  })
+                } catch {
+                  window.webContents.send('text-send', { ok: false, error: 'fallback_error', correlationId })
+                }
+                return
+              }
+              window.webContents.send('text-send', { ok: true, method: 'applescript', correlationId })
+              OverlayController.activateOverlay()
+            })
+          } else {
+            window.webContents.send('text-send', { ok: false, error: 'not_macos', correlationId })
+          }
+        } catch (err) {
           window.webContents.send('text-send', { ok: false, error: 'exception', correlationId })
         }
       })()

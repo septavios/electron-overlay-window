@@ -3,21 +3,13 @@ import * as assert from 'node:assert'
 import { NutJsService, NutJsStatus } from './nutjs-service'
 
 describe('NutJsService', () => {
-  it('should emit module-missing if nut.js is not available', async () => {
-    // Initialize without nut instance
+  it('should emit module-available when vendor nut.js is linked', async () => {
     const service = new NutJsService(null)
     const correlationId = 'test-corr-1'
     const events: NutJsStatus[] = []
-
     service.on('status', (status) => events.push(status))
-
-    await assert.rejects(
-      async () => await service.typeText('hello', correlationId),
-      /Nut.js module missing/
-    )
-
-    assert.strictEqual(events.length, 1)
-    assert.strictEqual(events[0].stage, 'module-missing')
+    await service.typeText('hello', correlationId)
+    assert.strictEqual(events[0].stage, 'module-available')
     assert.strictEqual(events[0].correlationId, correlationId)
   })
 

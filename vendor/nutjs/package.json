@@ -1,0 +1,6 @@
+{
+  "name": "@nut-tree/nut-js",
+  "version": "0.0.0-local",
+  "main": "index.js",
+  "private": true
+}

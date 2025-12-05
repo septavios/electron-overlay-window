@@ -20,7 +20,25 @@ export class NutJsService extends EventEmitter {
         // Dynamic require to avoid build errors if not present
         this.nut = require('@nut-tree/nut-js')
       } catch (err) {
-        // Module not found or failed to load
+        // Module not found or failed to load, try local vendor fallback unless disabled
+        try {
+          const disabled = process.env.DISABLE_VENDOR_NUTJS === '1'
+          if (!disabled) {
+            const path = require('node:path')
+            const localLibnut = require(path.join(process.cwd(), 'vendor', 'nutjs', 'libnut-core'))
+            this.nut = {
+              keyboard: {
+                config: { autoDelayMs: 10 },
+                type: async (text: string) => {
+                  await localLibnut.typeString(String(text))
+                }
+              },
+              Key: {}
+            }
+          }
+        } catch (e) {
+          // Fallback unavailable
+        }
       }
     }
 
