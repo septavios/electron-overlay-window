@@ -123,4 +123,26 @@ describe('NutJsService', () => {
     // 4. Move Right
     assert.strictEqual((mockType.mock.calls[5].arguments as any[])[0], 'Right')
   })
+
+  it('emitAvailability reports available when nut instance present', () => {
+    const mockNut = { keyboard: { config: {} } }
+    const service = new NutJsService(mockNut)
+    const events: NutJsStatus[] = []
+    service.on('status', (s) => events.push(s))
+    service.emitAvailability('avail-1')
+    assert.strictEqual(events.length, 1)
+    assert.strictEqual(events[0].stage, 'module-available')
+    assert.strictEqual(events[0].correlationId, 'avail-1')
+  })
+
+  it('emitAvailability reports missing when nut instance absent', () => {
+    const service = new NutJsService(undefined as any)
+    ;(service as any).nut = null
+    const events: NutJsStatus[] = []
+    service.on('status', (s) => events.push(s))
+    service.emitAvailability('miss-1')
+    assert.strictEqual(events.length, 1)
+    assert.strictEqual(events[0].stage, 'module-missing')
+    assert.strictEqual(events[0].correlationId, 'miss-1')
+  })
 })

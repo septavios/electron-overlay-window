@@ -1,8 +1,8 @@
-import { app, BrowserWindow, globalShortcut, Menu, ipcMain, clipboard, dialog } from 'electron'
+import { app, BrowserWindow, globalShortcut, Menu, ipcMain, clipboard, dialog, nativeImage } from 'electron'
 let macPermissions: any
 try { macPermissions = require('node-mac-permissions') } catch {}
 import { join } from 'node:path'
-import { OverlayController, OVERLAY_WINDOW_OPTS } from '../'
+import { OverlayController, OVERLAY_WINDOW_OPTS, getAlwaysOnTopLevel } from '../'
 import { NutJsService } from './nutjs-service'
 import { randomUUID } from 'crypto'
 
@@ -48,6 +48,7 @@ function createWindow() {
       logPerm('accessibility', statusAcc)
       logPerm('screen', statusScreen)
       logPerm('input-monitoring', statusInput)
+      try { window.webContents.send('perm-status', { accessibility: statusAcc, screen: statusScreen, inputMonitoring: statusInput }) } catch {}
       if (statusAcc !== 'authorized') macPermissions.askForAccessibilityAccess()
     }
   } catch {}
@@ -541,9 +542,11 @@ function createWindow() {
       <div class="grid-2">
         <button id="btnToggleClick">
           Interactive <span class="key-hint">${toggleMouseKey}</span>
+          <span id="valCoreInteractive" style="margin-left:6px;opacity:.85;">Interactive</span>
         </button>
         <button id="btnToggleVis">
           Visibility <span class="key-hint">${toggleShowKey}</span>
+          <span id="valCoreVisibility" style="margin-left:6px;opacity:.85;">Visible</span>
         </button>
       </div>
     </div>
@@ -587,6 +590,32 @@ function createWindow() {
         <button class="small" id="btnResize">↔ Resize</button>
         <button class="small" id="btnBottomRight">⬊ BR</button>
       </div>
+      <div style="display:flex; gap:6px; margin-top:8px; align-items:center;">
+        <input type="number" id="offsetX" placeholder="Offset X" style="width:90px;">
+        <input type="number" id="offsetY" placeholder="Offset Y" style="width:90px;">
+        <button class="small" id="btnApplyOffset">Apply Offset</button>
+        <button class="small" id="btnSaveOffset">Save</button>
+        <button class="small" id="btnClearOffset">Clear</button>
+      </div>
+      <div style="display:flex; gap:6px; margin-top:8px; align-items:center;">
+        <input type="number" id="sizeW" placeholder="Width" style="width:90px;">
+        <input type="number" id="sizeH" placeholder="Height" style="width:90px;">
+        <button class="small" id="btnApplySize">Apply Size</button>
+        <button class="small" id="btnSaveSize">Save</button>
+        <button class="small" id="btnClearSize">Clear</button>
+      </div>
+    </div>
+
+    <!-- Window Management -->
+    <div class="section" id="sectionWindow">
+      <div class="section-title">Window Management <span class="chev"></span></div>
+      <div class="grid-2">
+        <button id="btnFocusOverlay">Focus Overlay</button>
+        <button id="btnFocusTarget">Focus Target</button>
+        <button id="btnMinimize">Minimize App</button>
+        <button id="btnRestore">Restore App</button>
+        <button id="btnResetOverlay" class="primary">Reset Overlay</button>
+      </div>
     </div>
 
     <!-- Performance Test -->
@@ -622,6 +651,26 @@ function createWindow() {
         <span>Attach Time</span>
         <span class="metric-value" id="valAttachTime">-</span>
       </div>
+      <div class="metric-row">
+        <span>AlwaysOnTop</span>
+        <span class="metric-value" id="valTopLevel">-</span>
+      </div>
+      <div class="metric-row">
+        <span>Accessibility</span>
+        <span class="metric-value" id="valPermAcc">-</span>
+      </div>
+      <div class="metric-row">
+        <span>Screen Recording</span>
+        <span class="metric-value" id="valPermScreen">-</span>
+      </div>
+      <div class="metric-row">
+        <span>Input Monitoring</span>
+        <span class="metric-value" id="valPermInput">-</span>
+      </div>
+      <div class="grid-2" style="margin-top: 8px;">
+        <button id="btnPermRefresh">Refresh Permissions</button>
+        <button id="btnPermRequestAcc">Request Accessibility</button>
+      </div>
     </div>
 
     <!-- Event Log (moved to right sidebar) -->
@@ -648,6 +697,9 @@ function createWindow() {
         <button id="btnNutHighlight">Nut.js: Highlight Active Window</button>
         <button id="btnNutWindowInfo">Nut.js: Active Window Info</button>
       </div>
+      <div class="grid-2" style="margin-top: 8px;">
+        <button id="btnScreenshotWin">Win: Capture Screenshot</button>
+      </div>
       <div style="display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; align-items: center;">
         <input type="text" id="inputMsg" placeholder="Text to simulate..." style="flex: 1;">
         <button id="btnSendNut" class="small primary" title="Use nut.js">Send (nut.js)</button>
@@ -670,6 +722,7 @@ function createWindow() {
   <div id="fakeCursor"></div>
   <div class="border-frame" id="borderFrame"></div>
   <div id="toastMsg">Message sent</div>
+  <div id="screenshotArea" style="position: fixed; right: 20px; bottom: 20px; width: 320px; height: 180px; border: 1px solid var(--glass-border); border-radius: 8px; overflow: hidden; background: rgba(0,0,0,0.35);"></div>
   <button class="sticky-help hidden" id="stickyHelp" aria-label="Open Help (CmdOrCtrl+/)">Help</button>
 
   <!-- Tour Overlay -->
@@ -696,6 +749,12 @@ function createWindow() {
     const valFps = document.getElementById('valFps');
     const valItems = document.getElementById('valItems');
     const valAttachTime = document.getElementById('valAttachTime');
+    const valTopLevel = document.getElementById('valTopLevel');
+    const valPermAcc = document.getElementById('valPermAcc');
+    const valPermScreen = document.getElementById('valPermScreen');
+    const valPermInput = document.getElementById('valPermInput');
+    const valCoreInteractive = document.getElementById('valCoreInteractive');
+    const valCoreVisibility = document.getElementById('valCoreVisibility');
     const eventLog = document.getElementById('eventLog');
     const heavyList = document.getElementById('heavyList');
     const mainPanel = document.getElementById('mainPanel');
@@ -704,6 +763,8 @@ function createWindow() {
     const targetSelect = document.getElementById('targetSelect');
     const customTarget = document.getElementById('customTarget');
     const stickyHelp = document.getElementById('stickyHelp');
+    const screenshotArea = document.getElementById('screenshotArea');
+    const borderFrame = document.getElementById('borderFrame');
 
     // State
     let isInteractive = true;
@@ -804,12 +865,102 @@ function createWindow() {
     document.getElementById('btnBottomRight').onclick = () => ipc.send('action', 'position', 'bottom-right');
     document.getElementById('btnResize').onclick = () => ipc.send('action', 'resize');
 
+    const offsetX = document.getElementById('offsetX');
+    const offsetY = document.getElementById('offsetY');
+    const btnApplyOffset = document.getElementById('btnApplyOffset');
+    const btnSaveOffset = document.getElementById('btnSaveOffset');
+    const btnClearOffset = document.getElementById('btnClearOffset');
+    const sizeW = document.getElementById('sizeW');
+    const sizeH = document.getElementById('sizeH');
+    const btnApplySize = document.getElementById('btnApplySize');
+    const btnSaveSize = document.getElementById('btnSaveSize');
+    const btnClearSize = document.getElementById('btnClearSize');
+    let sizeOverride = null;
+
+    function applyOffsetFromInputs(save) {
+      const x = Number(offsetX && offsetX.value || 0) || 0;
+      const y = Number(offsetY && offsetY.value || 0) || 0;
+      ipc.send('action', 'overlay-offset', { x, y });
+      if (save) {
+        try { localStorage.setItem('overlayOffset', JSON.stringify({ x, y })) } catch {}
+        log('POS', 'Offset saved: ' + x + ',' + y)
+      } else {
+        log('POS', 'Offset applied: ' + x + ',' + y)
+      }
+    }
+
+    if (btnApplyOffset) btnApplyOffset.onclick = () => applyOffsetFromInputs(false);
+    if (btnSaveOffset) btnSaveOffset.onclick = () => applyOffsetFromInputs(true);
+    if (btnClearOffset) btnClearOffset.onclick = () => {
+      try { localStorage.removeItem('overlayOffset') } catch {}
+      ipc.send('action', 'overlay-offset-clear');
+      log('POS', 'Offset cleared')
+    };
+
+    function applySizeFromInputs(save) {
+      const w = Number(sizeW && sizeW.value || 0) || 0;
+      const h = Number(sizeH && sizeH.value || 0) || 0;
+      ipc.send('action', 'overlay-size', { width: w, height: h });
+      sizeOverride = { width: w, height: h };
+      if (save) {
+        try { localStorage.setItem('overlaySize', JSON.stringify({ width: w, height: h })) } catch {}
+        log('POS', 'Size saved: ' + w + 'x' + h)
+      } else {
+        log('POS', 'Size applied: ' + w + 'x' + h)
+      }
+    }
+    if (btnApplySize) btnApplySize.onclick = () => applySizeFromInputs(false);
+    if (btnSaveSize) btnSaveSize.onclick = () => applySizeFromInputs(true);
+    if (btnClearSize) btnClearSize.onclick = () => {
+      try { localStorage.removeItem('overlaySize') } catch {}
+      ipc.send('action', 'overlay-size-clear');
+      sizeOverride = null;
+      log('POS', 'Size cleared')
+    };
+
+    // Window Management
+    document.getElementById('btnFocusOverlay').onclick = () => ipc.send('action', 'focus-overlay');
+    document.getElementById('btnFocusTarget').onclick = () => ipc.send('action', 'focus-target');
+    document.getElementById('btnMinimize').onclick = () => ipc.send('action', 'window-minimize');
+    document.getElementById('btnRestore').onclick = () => ipc.send('action', 'window-restore');
+    const btnResetOverlay = document.getElementById('btnResetOverlay');
+    if (btnResetOverlay) {
+      btnResetOverlay.onclick = () => ipc.send('action', 'reset-overlay');
+    }
+
     // Feature Controls
     document.getElementById('btnBorder').onclick = () => {
       document.body.classList.toggle('border-active');
       const isActive = document.body.classList.contains('border-active');
-      log('FEAT', \`Border highlight \${isActive ? 'enabled' : 'disabled'}\`);
+      log('FEAT', 'Border highlight ' + (isActive ? 'enabled' : 'disabled'));
     };
+
+    const btnPermRefresh = document.getElementById('btnPermRefresh');
+    if (btnPermRefresh) {
+      btnPermRefresh.onclick = () => {
+        ipc.send('action', 'perm-refresh');
+        log('CMD', 'Refresh permissions');
+      };
+    }
+    const btnPermRequestAcc = document.getElementById('btnPermRequestAcc');
+    if (btnPermRequestAcc) {
+      btnPermRequestAcc.onclick = () => {
+        ipc.send('action', 'perm-request-acc');
+        log('CMD', 'Request accessibility');
+      };
+    }
+
+    const btnScreenshotWin = document.getElementById('btnScreenshotWin');
+    if (btnScreenshotWin) {
+      btnScreenshotWin.onclick = () => {
+        try {
+          ipc.send('action', 'capture-screenshot');
+          log('CMD', 'Capture screenshot requested');
+        } catch (err) {
+          log('ERROR', 'Failed to request screenshot');
+        }
+      };
+    }
 
     const inputMsg = document.getElementById('inputMsg');
     const toastMsg = document.getElementById('toastMsg');
@@ -1027,6 +1178,7 @@ function createWindow() {
       document.body.classList.add('mode-transition')
       statusDot.className = state ? 'status-dot active' : 'status-dot inactive';
       valMode.textContent = state ? 'Interactive' : 'Passthrough';
+      if (valCoreInteractive) valCoreInteractive.textContent = state ? 'Interactive' : 'Passthrough';
       valFocus.textContent = state ? 'Focused' : 'Blurred';
       valFocus.style.color = state ? 'var(--success)' : 'var(--text-muted)';
       
@@ -1065,7 +1217,17 @@ function createWindow() {
       const { type, x, y, width, height, isFullscreen } = payload;
       
       if (type === 'moveresize' || type === 'attach') {
-        valBounds.textContent = x + ',' + y + ' (' + width + '×' + height + ')';
+        var dw = sizeOverride && sizeOverride.width ? sizeOverride.width : width;
+        var dh = sizeOverride && sizeOverride.height ? sizeOverride.height : height;
+        valBounds.textContent = x + ',' + y + ' (' + dw + '×' + dh + ')';
+        if (borderFrame) {
+          borderFrame.style.top = '4px';
+          borderFrame.style.left = '4px';
+          var bw = Math.max(0, (dw - 8));
+          var bh = Math.max(0, (dh - 8));
+          borderFrame.style.width = bw + 'px';
+          borderFrame.style.height = bh + 'px';
+        }
         if (type === 'attach') {
           valFocus.textContent = 'Focused';
           valFocus.style.color = 'var(--success)';
@@ -1101,6 +1263,44 @@ function createWindow() {
       }
     });
 
+    ipc.on('stack-level', (level) => {
+      const v = level || 'default';
+      if (valTopLevel) valTopLevel.textContent = String(v);
+      log('LIB', 'AlwaysOnTop level: ' + v);
+    });
+
+    ipc.on('perm-status', (payload) => {
+      const { accessibility, screen, inputMonitoring } = payload || {};
+      if (valPermAcc) valPermAcc.textContent = String(accessibility || 'unknown');
+      if (valPermScreen) valPermScreen.textContent = String(screen || 'unknown');
+      if (valPermInput) valPermInput.textContent = String(inputMonitoring || 'unknown');
+      log('PERM', 'acc=' + accessibility + ' screen=' + screen + ' input=' + inputMonitoring);
+    });
+
+    ipc.on('platform', (plat) => {
+      const isWin = String(plat) === 'win32';
+      if (!isWin && btnScreenshotWin) {
+        btnScreenshotWin.setAttribute('disabled', 'true');
+        btnScreenshotWin.textContent = 'Win-only: Capture Screenshot';
+      }
+    });
+
+    ipc.on('screenshot', (payload) => {
+      try {
+        const { dataURL, width, height } = payload || {};
+        if (!dataURL) return;
+        const img = new Image();
+        img.src = dataURL;
+        img.style.width = '100%';
+        img.style.height = '100%';
+        screenshotArea.innerHTML = '';
+        screenshotArea.appendChild(img);
+        log('LIB', 'Screenshot captured ' + width + 'x' + height);
+      } catch (err) {
+        log('ERROR', 'Failed to display screenshot');
+      }
+    });
+
     ipc.on('attach-error', (message) => {
       log('ERROR', message);
       valAttachTime.textContent = 'Failed';
@@ -1113,6 +1313,7 @@ function createWindow() {
         isUIHiddenManual = !isUIHiddenManual
         document.body.classList.toggle('hidden-ui', isUIHiddenManual)
         const hidden = document.body.classList.contains('hidden-ui')
+        if (valCoreVisibility) valCoreVisibility.textContent = hidden ? 'UI: Hidden' : 'UI: Visible'
         log('UI', hidden ? 'UI hidden (manual)' : 'UI visible (manual)')
       } catch (err) {
         log('ERROR', 'Failed to toggle UI visibility')
@@ -1122,7 +1323,12 @@ function createWindow() {
     ipc.on('ui:ensure-visible', () => {
       isUIHiddenManual = false
       document.body.classList.remove('hidden-ui')
+      if (valCoreVisibility) valCoreVisibility.textContent = 'UI: Visible'
       log('UI', 'UI visibility reset')
+    })
+
+    ipc.on('visibility', (visible) => {
+      if (valCoreVisibility) valCoreVisibility.textContent = visible ? 'App: Visible' : 'App: Hidden'
     })
 
     ipc.on('ui:open-help', () => startTour());
@@ -1216,6 +1422,10 @@ function createWindow() {
       OverlayController.activateOverlay()
       window.webContents.send('focus-change', true)
       console.log('Overlay activated after load')
+      try { window.webContents.send('stack-level', getAlwaysOnTopLevel()) } catch {}
+      try { nutService.emitAvailability('init') } catch {}
+      try { window.webContents.send('platform', process.platform) } catch {}
+      try { window.webContents.send('visibility', window.isVisible()) } catch {}
     } catch (err) {
       console.error('Failed to activate overlay after load', err)
     }
@@ -1324,6 +1534,7 @@ function makeDemoInteractive() {
     try {
       if (window.isVisible()) {
         window.hide()
+        try { window.webContents.send('visibility', false) } catch {}
       } else {
         window.show()
         isInteractable = true
@@ -1331,6 +1542,7 @@ function makeDemoInteractive() {
           OverlayController.activateOverlay()
           window.webContents.send('focus-change', true)
           window.webContents.send('ui:ensure-visible')
+          window.webContents.send('visibility', true)
         } catch { }
       }
     } catch (err) {
@@ -1444,6 +1656,73 @@ function makeDemoInteractive() {
       } catch (err: any) {
         window.webContents.send('log', { type: 'ERROR', message: `Window info failed: ${err && err.message}` })
       }
+    }
+
+    if (type === 'capture-screenshot') {
+      try {
+        if (process.platform !== 'win32') {
+          window.webContents.send('log', { type: 'ERROR', message: 'Screenshot demo is Windows-only' })
+        } else {
+          const { width, height } = OverlayController.targetBounds
+          const buf = OverlayController.screenshot()
+          const img = nativeImage.createFromBitmap(buf, { width, height })
+          const dataURL = img.toDataURL()
+          window.webContents.send('screenshot', { dataURL, width, height })
+        }
+      } catch (err: any) {
+        window.webContents.send('log', { type: 'ERROR', message: `Screenshot failed: ${err && err.message}` })
+      }
+    }
+
+    if (type === 'overlay-offset') {
+      try {
+        const x = Number((data && data.x) || 0) || 0
+        const y = Number((data && data.y) || 0) || 0
+        ;(OverlayController as any).setOverlayOffset(x, y)
+      } catch {}
+    }
+
+    if (type === 'overlay-offset-clear') {
+      try {
+        ;(OverlayController as any).clearOverlayOffset()
+      } catch {}
+    }
+
+    if (type === 'overlay-size') {
+      try {
+        const w = Number((data && data.width) || 0) || 0
+        const h = Number((data && data.height) || 0) || 0
+        ;(OverlayController as any).setOverlaySize(w, h)
+      } catch {}
+    }
+
+    if (type === 'overlay-size-clear') {
+      try {
+        ;(OverlayController as any).clearOverlaySize()
+      } catch {}
+    }
+
+    if (type === 'perm-refresh') {
+      try {
+        if (process.platform === 'darwin' && macPermissions) {
+          const a = macPermissions.getAuthStatus('accessibility')
+          const s = macPermissions.getAuthStatus('screen')
+          const i = macPermissions.getAuthStatus('input-monitoring')
+          window.webContents.send('perm-status', { accessibility: a, screen: s, inputMonitoring: i })
+        }
+      } catch {}
+    }
+
+    if (type === 'perm-request-acc') {
+      try {
+        if (process.platform === 'darwin' && macPermissions && macPermissions.askForAccessibilityAccess) {
+          macPermissions.askForAccessibilityAccess()
+          const a = macPermissions.getAuthStatus('accessibility')
+          const s = macPermissions.getAuthStatus('screen')
+          const i = macPermissions.getAuthStatus('input-monitoring')
+          window.webContents.send('perm-status', { accessibility: a, screen: s, inputMonitoring: i })
+        }
+      } catch {}
     }
 
     if (type === 'send-text') {
@@ -1762,6 +2041,49 @@ function makeDemoInteractive() {
       })()
     }
 
+    if (type === 'focus-overlay') {
+      try {
+        OverlayController.activateOverlay()
+        window.webContents.send('focus-change', true)
+      } catch {}
+    }
+
+    if (type === 'focus-target') {
+      try {
+        OverlayController.focusTarget()
+        window.webContents.send('focus-change', false)
+      } catch {}
+    }
+
+    if (type === 'window-minimize') {
+      try {
+        window.minimize()
+        window.webContents.send('visibility', false)
+      } catch {}
+    }
+
+    if (type === 'window-restore') {
+      try {
+        window.restore()
+        window.show()
+        OverlayController.activateOverlay()
+        window.webContents.send('focus-change', true)
+        window.webContents.send('visibility', true)
+      } catch {}
+    }
+
+    if (type === 'reset-overlay') {
+      try {
+        ;(OverlayController as any).clearOverlayOffset()
+        ;(OverlayController as any).clearOverlaySize()
+        window.show()
+        OverlayController.activateOverlay()
+        window.webContents.send('ui:ensure-visible')
+        window.webContents.send('focus-change', true)
+        window.webContents.send('visibility', true)
+      } catch {}
+    }
+
     if (type === 'clipboard-demo') {
       const text: string = String(data || 'Clipboard Test')
       const correlationId = randomUUID();
@@ -1867,4 +2189,3 @@ app.on('will-quit', () => {
 app.on('window-all-closed', () => {
   app.quit()
 })
- 

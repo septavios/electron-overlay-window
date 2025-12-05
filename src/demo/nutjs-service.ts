@@ -51,6 +51,25 @@ export class NutJsService extends EventEmitter {
     return !!this.nut
   }
 
+  emitAvailability(correlationId: string = 'init'): void {
+    const ts = Date.now()
+    if (this.nut) {
+      this.emit('status', {
+        stage: 'module-available',
+        correlationId,
+        timestamp: ts,
+        details: { version: 'detected' }
+      } as NutJsStatus)
+    } else {
+      this.emit('status', {
+        stage: 'module-missing',
+        correlationId,
+        timestamp: ts,
+        details: { message: 'Nut.js dependency is not installed or failed to load' }
+      } as NutJsStatus)
+    }
+  }
+
   async typeText(text: string, correlationId: string): Promise<void> {
     // Capture start time
     const startTimestamp = Date.now()

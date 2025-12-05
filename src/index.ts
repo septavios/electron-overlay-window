@@ -79,6 +79,8 @@ class OverlayControllerGlobal {
   // The height of a title bar on a standard window. Only measured on Mac
   private macTitleBarHeight = 0
   private attachOptions: AttachOptions = {}
+  private overlayOffset = { x: 0, y: 0 }
+  private overlaySizeOverride: { width: number, height: number } | null = null
 
   readonly events = new EventEmitter()
 
@@ -171,12 +173,20 @@ class OverlayControllerGlobal {
     if (process.platform === 'win32') {
       lastBounds = screen.screenToDipRect(this.electronWindow, this.targetBounds)
     }
+    lastBounds = { ...lastBounds, x: lastBounds.x + this.overlayOffset.x, y: lastBounds.y + this.overlayOffset.y }
+    if (this.overlaySizeOverride) {
+      lastBounds = { ...lastBounds, width: this.overlaySizeOverride.width, height: this.overlaySizeOverride.height }
+    }
     this.electronWindow.setBounds(lastBounds)
 
     // if moved to screen with different DPI, 2nd call to setBounds will correctly resize window
     // dipRect must be recalculated as well
     if (process.platform === 'win32') {
       lastBounds = screen.screenToDipRect(this.electronWindow, this.targetBounds)
+      lastBounds = { ...lastBounds, x: lastBounds.x + this.overlayOffset.x, y: lastBounds.y + this.overlayOffset.y }
+      if (this.overlaySizeOverride) {
+        lastBounds = { ...lastBounds, width: this.overlaySizeOverride.width, height: this.overlaySizeOverride.height }
+      }
       this.electronWindow.setBounds(lastBounds)
     }
   }
@@ -257,6 +267,28 @@ class OverlayControllerGlobal {
     this.focusNext = 'target'
     this.electronWindow?.setIgnoreMouseEvents(true)
     lib.focusTarget()
+  }
+
+  setOverlayOffset (x: number, y: number) {
+    this.overlayOffset = { x: Math.round(Number(x) || 0), y: Math.round(Number(y) || 0) }
+    this.updateOverlayBounds()
+  }
+
+  clearOverlayOffset () {
+    this.overlayOffset = { x: 0, y: 0 }
+    this.updateOverlayBounds()
+  }
+
+  setOverlaySize (width: number, height: number) {
+    const w = Math.max(50, Math.round(Number(width) || 0))
+    const h = Math.max(50, Math.round(Number(height) || 0))
+    this.overlaySizeOverride = { width: w, height: h }
+    this.updateOverlayBounds()
+  }
+
+  clearOverlaySize () {
+    this.overlaySizeOverride = null
+    this.updateOverlayBounds()
   }
 
   attachByTitle (electronWindow: BrowserWindow | undefined, targetWindowTitle: string, options: AttachOptions = {}) {
