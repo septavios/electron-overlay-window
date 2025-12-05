@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut } from 'electron'
+import { app, BrowserWindow, globalShortcut, Menu } from 'electron'
 import { OverlayController, OVERLAY_WINDOW_OPTS } from '../'
 
 // https://github.com/electron/electron/issues/25153
@@ -52,8 +52,7 @@ function createWindow () {
     </body>
   `)
 
-  // NOTE: if you close Dev Tools overlay window will lose transparency
-  window.webContents.openDevTools({ mode: 'detach', activate: false })
+  // DevTools disabled in demo to align with macOS HIG
 
   makeDemoInteractive()
 
@@ -89,6 +88,40 @@ function makeDemoInteractive () {
   globalShortcut.register(toggleShowKey, () => {
     window.webContents.send('visibility-change', false)
   })
+
+  const menu = Menu.buildFromTemplate([
+    {
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    },
+    {
+      label: 'Overlay',
+      submenu: [
+        {
+          label: 'Toggle Click-Through',
+          accelerator: toggleMouseKey,
+          click: toggleOverlayState
+        },
+        {
+          label: 'Toggle Visibility',
+          accelerator: toggleShowKey,
+          click: () => window.webContents.send('visibility-change', false)
+        }
+      ]
+    },
+    { role: 'editMenu' },
+    { role: 'windowMenu' },
+    { role: 'help', submenu: [] }
+  ])
+  Menu.setApplicationMenu(menu)
 }
 
 app.on('ready', () => {
