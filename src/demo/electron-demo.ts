@@ -1,17 +1,28 @@
-import { app, BrowserWindow, globalShortcut, Menu, ipcMain } from 'electron'
+import { app, BrowserWindow, globalShortcut, Menu, ipcMain, clipboard } from 'electron'
 import { OverlayController, OVERLAY_WINDOW_OPTS } from '../'
+import { NutJsService } from './nutjs-service'
+import { randomUUID } from 'crypto'
 
 app.disableHardwareAcceleration()
 
 let window: BrowserWindow
+const nutService = new NutJsService()
+
+nutService.on('status', (status) => {
+  if (window && !window.isDestroyed()) {
+    window.webContents.send('nutjs-status', status)
+  }
+})
 
 const toggleMouseKey = 'CmdOrCtrl + J'
 const toggleShowKey = 'CmdOrCtrl + K'
 
 function createWindow() {
   window = new BrowserWindow({
-    width: 900,
-    height: 700,
+    width: 1280,
+    height: 800,
+    minWidth: 700,
+    minHeight: 500,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
@@ -49,11 +60,10 @@ function createWindow() {
       background: transparent;
     }
 
-    /* Hide UI elements when hidden-ui class is present */
+    /* Hide UI elements when hidden-ui class is present (keep passthrough warning visible) */
     body.hidden-ui .panel,
     body.hidden-ui .overlay-guide,
-    body.hidden-ui .heavy-list,
-    body.hidden-ui #passthroughWarning {
+    body.hidden-ui .heavy-list {
       display: none !important;
     }
 
@@ -78,7 +88,10 @@ function createWindow() {
       position: fixed;
       top: 20px;
       left: 20px;
-      width: 380px;
+      width: 600px;
+      min-width: 600px;
+      max-width: 600px;
+      min-height: 200px;
       max-height: calc(100vh - 40px);
       overflow-y: auto;
       background: var(--glass-bg);
@@ -128,7 +141,16 @@ function createWindow() {
       color: var(--text-muted);
       margin-bottom: 8px;
       font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
     }
+
+    .section-title .chev { width: 10px; height: 10px; border-right: 2px solid var(--text-muted); border-bottom: 2px solid var(--text-muted); transform: rotate(-45deg); transition: transform 0.2s; }
+    .section.collapsed .section-title .chev { transform: rotate(135deg); }
+    .section.collapsed > *:not(.section-title) { display: none; }
 
     .grid-2 {
       display: grid;
@@ -152,6 +174,8 @@ function createWindow() {
       font-size: 12px;
       transition: all 0.2s;
       text-align: center;
+      min-width: 44px;
+      min-height: 36px;
     }
     button:hover {
       background: rgba(255, 255, 255, 0.1);
@@ -159,6 +183,10 @@ function createWindow() {
     }
     button:active {
       transform: translateY(1px);
+    }
+    button:focus {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
     button.primary {
       background: var(--accent);
@@ -234,6 +262,8 @@ function createWindow() {
       font-size: 10px;
       padding: 8px;
       border: 1px solid var(--glass-border);
+      -webkit-font-smoothing: antialiased;
+      will-change: auto;
     }
     .log-entry {
       margin-bottom: 2px;
@@ -310,6 +340,80 @@ function createWindow() {
       font-size: 13px;
     }
 
+    /* Highlight Border Feature */
+    body.border-active {
+      box-shadow: inset 0 0 0 4px var(--danger);
+      transition: box-shadow 0.3s;
+    }
+
+    /* Fake Cursor for Auto Clicker */
+    #fakeCursor {
+      position: fixed;
+      width: 20px;
+      height: 20px;
+      background: rgba(255, 0, 0, 0.8);
+      border: 2px solid white;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 9999;
+      display: none;
+      box-shadow: 0 0 10px rgba(0,0,0,0.5);
+      transition: top 0.2s, left 0.2s;
+    }
+
+    /* Click Ripple Effect */
+    .click-effect {
+      position: fixed;
+      width: 40px;
+      height: 40px;
+      border: 2px solid var(--accent);
+      border-radius: 50%;
+      animation: ripple 0.5s linear forwards;
+      pointer-events: none;
+      z-index: 9998;
+    }
+
+    @keyframes ripple {
+      0% { transform: scale(0.5); opacity: 1; }
+      100% { transform: scale(2); opacity: 0; }
+    }
+
+    /* Toast Notification */
+    #toastMsg {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 12px;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      z-index: 10000;
+      border: 1px solid var(--glass-border);
+    }
+    #toastMsg.show { opacity: 1; }
+
+    /* Sticky Help Button */
+    .sticky-help {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      z-index: 1002;
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+    }
+    .sticky-help.hidden { display: none; }
+    .sticky-help:hover { background: var(--accent-hover); }
+
   </style>
 </head>
 <body>
@@ -329,8 +433,8 @@ function createWindow() {
     </div>
 
     <!-- Core Controls -->
-    <div class="section">
-      <div class="section-title">Core Controls</div>
+    <div class="section" id="sectionCore">
+      <div class="section-title">Core Controls <span class="chev"></span></div>
       <div class="grid-2">
         <button id="btnToggleClick">
           Interactive <span class="key-hint">${toggleMouseKey}</span>
@@ -341,9 +445,10 @@ function createWindow() {
       </div>
     </div>
 
+
     <!-- Opacity Control -->
-    <div class="section">
-      <div class="section-title">Appearance</div>
+    <div class="section" id="sectionAppearance">
+      <div class="section-title">Appearance <span class="chev"></span></div>
       <div class="slider-container">
         <div class="slider-label">
           <span>Background Opacity</span>
@@ -354,8 +459,8 @@ function createWindow() {
     </div>
 
     <!-- Target Window -->
-    <div class="section">
-      <div class="section-title">Target Window</div>
+    <div class="section" id="sectionTarget">
+      <div class="section-title">Target Window <span class="chev"></span></div>
       <select id="targetSelect">
         <option value="Untitled">Untitled (Mac TextEdit)</option>
         <option value="Notepad">Notepad (Windows)</option>
@@ -367,8 +472,8 @@ function createWindow() {
     </div>
 
     <!-- Positioning -->
-    <div class="section">
-      <div class="section-title">Positioning</div>
+    <div class="section" id="sectionPosition">
+      <div class="section-title">Positioning <span class="chev"></span></div>
       <div class="grid-3">
         <button class="small" id="btnTopLeft">⬉ TL</button>
         <button class="small" id="btnCenter">⊙ Center</button>
@@ -382,8 +487,8 @@ function createWindow() {
     </div>
 
     <!-- Performance Test -->
-    <div class="section">
-      <div class="section-title">Performance</div>
+    <div class="section" id="sectionPerf">
+      <div class="section-title">Performance <span class="chev"></span></div>
       <button id="btnHeavy" style="width: 100%;">Toggle Heavy Render Test</button>
       <div class="metric-row" style="margin-top: 8px;">
         <span>Render Items</span>
@@ -392,8 +497,8 @@ function createWindow() {
     </div>
 
     <!-- Status -->
-    <div class="section">
-      <div class="section-title">Status</div>
+    <div class="section" id="sectionStatus">
+      <div class="section-title">Status <span class="chev"></span></div>
       <div class="metric-row">
         <span>Mode</span>
         <span class="metric-value" id="valMode">Interactive</span>
@@ -417,22 +522,38 @@ function createWindow() {
     </div>
 
     <!-- Event Log -->
-    <div class="section">
+    <div class="section" id="sectionLog">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-        <div class="section-title" style="margin: 0;">Event Log</div>
+        <div class="section-title" style="margin: 0;">Event Log <span class="chev"></span></div>
         <button class="small" id="btnClearLog">Clear</button>
       </div>
       <div class="log-container" id="eventLog"></div>
     </div>
 
     <!-- Tour -->
-    <div class="section">
-      <div class="section-title">Help</div>
+    <div class="section" id="sectionHelp">
+      <div class="section-title">Help <span class="chev"></span></div>
       <button id="btnTour" style="width: 100%;">🎯 Start Guided Tour</button>
+    </div>
+
+    <!-- Features -->
+    <div class="section" id="sectionFeatures">
+      <div class="section-title">Features <span class="chev"></span></div>
+      <div class="grid-2">
+        <button id="btnBorder">Toggle Border</button>
+        <button id="btnAutoClick">Auto Clicker</button>
+      </div>
+      <div style="display: flex; gap: 4px; margin-top: 6px;">
+        <input type="text" id="inputMsg" placeholder="Text to simulate..." style="flex: 1;">
+        <button id="btnSendText" class="small">Send</button>
+      </div>
     </div>
   </div>
 
   <div class="heavy-list" id="heavyList"></div>
+  <div id="fakeCursor"></div>
+  <div id="toastMsg">Message sent</div>
+  <button class="sticky-help hidden" id="stickyHelp" aria-label="Open Help (CmdOrCtrl+/)">Help</button>
 
   <!-- Tour Overlay -->
   <div class="tour-overlay" id="tourOverlay">
@@ -465,6 +586,7 @@ function createWindow() {
     const opacityValue = document.getElementById('opacityValue');
     const targetSelect = document.getElementById('targetSelect');
     const customTarget = document.getElementById('customTarget');
+    const stickyHelp = document.getElementById('stickyHelp');
 
     // State
     let isInteractive = true;
@@ -494,8 +616,22 @@ function createWindow() {
     }
 
     // Core Controls
-    document.getElementById('btnToggleClick').onclick = () => ipcRenderer.send('action', 'toggle-click');
-    document.getElementById('btnToggleVis').onclick = () => ipcRenderer.send('action', 'toggle-visibility');
+    document.getElementById('btnToggleClick').onclick = () => {
+      try {
+        log('UI', 'Interactive button clicked')
+        ipcRenderer.send('action', 'toggle-click')
+      } catch (err) {
+        log('ERROR', 'Failed to send toggle-click')
+      }
+    };
+    document.getElementById('btnToggleVis').onclick = () => {
+      try {
+        log('UI', 'Visibility button clicked')
+        ipcRenderer.send('action', 'toggle-visibility')
+      } catch (err) {
+        log('ERROR', 'Failed to send toggle-visibility')
+      }
+    };
     document.getElementById('btnHeavy').onclick = () => ipcRenderer.send('action', 'toggle-heavy');
     document.getElementById('btnClearLog').onclick = () => { eventLog.innerHTML = ''; log('UI', 'Log cleared'); };
 
@@ -540,10 +676,74 @@ function createWindow() {
     document.getElementById('btnBottomRight').onclick = () => ipcRenderer.send('action', 'position', 'bottom-right');
     document.getElementById('btnResize').onclick = () => ipcRenderer.send('action', 'resize');
 
+    // Feature Controls
+    document.getElementById('btnBorder').onclick = () => {
+      document.body.classList.toggle('border-active');
+      const isActive = document.body.classList.contains('border-active');
+      log('FEAT', \`Border highlight \${isActive ? 'enabled' : 'disabled'}\`);
+    };
+
+    const inputMsg = document.getElementById('inputMsg');
+    const toastMsg = document.getElementById('toastMsg');
+    document.getElementById('btnSendText').onclick = () => {
+      const text = inputMsg.value;
+      if (!text) return;
+      
+      log('INPUT', \`Simulated keystrokes: "\${text}"\`);
+      toastMsg.textContent = \`Sent: "\${text}"\`;
+      toastMsg.classList.add('show');
+      setTimeout(() => toastMsg.classList.remove('show'), 2000);
+      inputMsg.value = '';
+      try {
+        ipcRenderer.send('action', 'send-text', text)
+      } catch (err) {
+        log('ERROR', 'Failed to send text to target')
+      }
+    };
+
+    let autoClickInterval;
+    const fakeCursor = document.getElementById('fakeCursor');
+    document.getElementById('btnAutoClick').onclick = function() {
+      if (autoClickInterval) {
+        clearInterval(autoClickInterval);
+        autoClickInterval = null;
+        this.textContent = 'Auto Clicker';
+        this.classList.remove('primary');
+        fakeCursor.style.display = 'none';
+        log('FEAT', 'Auto clicker stopped');
+      } else {
+        this.textContent = 'Stop Clicking';
+        this.classList.add('primary');
+        fakeCursor.style.display = 'block';
+        log('FEAT', 'Auto clicker started');
+        
+        autoClickInterval = setInterval(() => {
+          const x = Math.random() * (window.innerWidth - 50);
+          const y = Math.random() * (window.innerHeight - 50);
+          
+          fakeCursor.style.top = y + 'px';
+          fakeCursor.style.left = x + 'px';
+          
+          setTimeout(() => {
+            // Show click effect
+            const ripple = document.createElement('div');
+            ripple.className = 'click-effect';
+            ripple.style.top = (y - 10) + 'px';
+            ripple.style.left = (x - 10) + 'px';
+            document.body.appendChild(ripple);
+            setTimeout(() => ripple.remove(), 600);
+            
+            log('CLICK', \`Simulated click at \${Math.floor(x)}, \${Math.floor(y)}\`);
+          }, 200);
+        }, 1000);
+      }
+    };
+
     // Tour
     let tourStep = 0;
     const tourSteps = [
       { title: 'Welcome!', text: 'This demo showcases the electron-overlay-window library. Click Next to start the tour.' },
+      { title: 'New Features', text: 'Try the new "Features" section! Toggle border highlight, simulate text input, and test auto-clicking.' },
       { title: 'Interactive Mode', text: 'Toggle between Interactive (can click overlay) and Passthrough (clicks go through).' },
       { title: 'Opacity Control', text: 'Adjust the overlay transparency with this slider.' },
       { title: 'Target Window', text: 'Change which window the overlay attaches to.' },
@@ -578,6 +778,55 @@ function createWindow() {
       document.getElementById('tourOverlay').style.display = 'none';
     }
 
+    Array.from(document.querySelectorAll('.section')).forEach(sec => {
+      const title = sec.querySelector('.section-title');
+      if (title) title.addEventListener('click', () => sec.classList.toggle('collapsed'))
+    });
+    document.getElementById('sectionPerf')?.classList.add('collapsed');
+    document.getElementById('sectionStatus')?.classList.add('collapsed');
+    document.getElementById('sectionLog')?.classList.add('collapsed');
+    document.getElementById('sectionHelp')?.classList.add('collapsed');
+
+    function isFullyVisible(el) {
+      if (!el) return true;
+      const rect = el.getBoundingClientRect();
+      return rect.top >= 0 && rect.left >= 0 && rect.bottom <= window.innerHeight && rect.right <= window.innerWidth;
+    }
+
+    function updateHelpVisibilityIndicator() {
+      const helpSection = document.getElementById('sectionHelp');
+      const helpButton = document.getElementById('btnTour');
+      const obscured = !isFullyVisible(helpSection) || !isFullyVisible(helpButton);
+      stickyHelp.classList.toggle('hidden', !obscured);
+      if (obscured) stickyHelp.title = 'Help is hidden. Click to open.';
+    }
+
+    stickyHelp.addEventListener('click', () => startTour());
+    window.addEventListener('resize', updateHelpVisibilityIndicator);
+    updateHelpVisibilityIndicator();
+
+    // Panel Dimension Locking
+    function lockPanelDimensions() {
+      const panel = document.getElementById('mainPanel');
+      if (panel) {
+        // Enforce fixed dimensions to prevent unintended resizing
+        panel.style.width = '600px';
+        panel.style.minWidth = '600px';
+        panel.style.maxWidth = '600px';
+        // Prevent collapse below reasonable height
+        if (panel.offsetHeight < 200) {
+          panel.style.minHeight = '200px';
+        }
+      }
+    }
+    lockPanelDimensions();
+    window.addEventListener('resize', () => {
+      // Debounce slightly if needed, but lightweight enough
+      requestAnimationFrame(lockPanelDimensions);
+    });
+
+    window.addEventListener('contextmenu', (e) => { e.preventDefault(); startTour(); });
+
     // IPC Listeners
     ipcRenderer.on('focus-change', (e, state) => {
       isInteractive = state;
@@ -586,7 +835,9 @@ function createWindow() {
       
       const warning = document.getElementById('passthroughWarning');
       warning.style.display = state ? 'none' : 'block';
-      mainPanel.style.opacity = state ? '1' : '0.6';
+      document.body.classList.toggle('passthrough-mode', !state);
+      // Ensure the UI panel hides in passthrough to avoid display overlap
+      document.body.classList.toggle('hidden-ui', !state);
       
       log('MODE', state ? 'Interactive' : 'Passthrough');
     });
@@ -651,12 +902,72 @@ function createWindow() {
       valAttachTime.style.color = 'var(--danger)';
     });
 
+    ipcRenderer.on('ui:toggle-visibility', () => {
+      try {
+        document.body.classList.toggle('hidden-ui')
+        const hidden = document.body.classList.contains('hidden-ui')
+        log('UI', hidden ? 'UI hidden' : 'UI visible')
+      } catch (err) {
+        log('ERROR', 'Failed to toggle UI visibility')
+      }
+    })
+
+    ipcRenderer.on('ui:open-help', () => startTour());
+
+    ipcRenderer.on('text-send', (_e, payload) => {
+      if (payload && payload.ok) {
+        const method = String(payload.method || 'applescript')
+        log('INPUT', 'Text delivered to TextEdit (' + method + ')')
+      } else {
+        if (payload && payload.error === 'automation_or_accessibility_denied') {
+          log('ERROR', 'Permission required: enable Automation for this app (TextEdit), and Accessibility for keystrokes')
+        } else if (payload && payload.error === 'nutjs_failed') {
+          log('ERROR', 'nut.js typing failed, ensure Accessibility is enabled and module is compatible')
+        } else {
+          log('ERROR', 'Text delivery failed')
+        }
+      }
+    })
+
+    ipcRenderer.on('nutjs-status', (_e, payload) => {
+      if (!payload || !payload.stage) return
+      
+      const cid = payload.correlationId ? \`[\${payload.correlationId.slice(0, 6)}]\` : ''
+      
+      if (payload.stage === 'module-available') {
+        log('NUT', \`\${cid} nut.js available\`)
+      } else if (payload.stage === 'module-missing') {
+        log('NUT', \`\${cid} nut.js module missing, using fallback\`)
+      } else if (payload.stage === 'typing-start') {
+        const details = payload.details || {}
+        log('NUT', \`\${cid} Typing started (\${details.length || 0} chars): \${details.preview || ''}\`)
+      } else if (payload.stage === 'typing-success') {
+        log('NUT', \`\${cid} Typing success. Confirmed.\`)
+      } else if (payload.stage === 'typing-error') {
+        const msg = String(payload.error || 'unknown error')
+        log('NUT', \`\${cid} Typing error: \${msg}\`)
+        if (payload.details && payload.details.stack) {
+          console.error(payload.details.stack)
+        }
+      }
+    })
+
   </script>
 </body>
 </html>
   `
 
   window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+
+  window.webContents.once('did-finish-load', () => {
+    try {
+      OverlayController.activateOverlay()
+      window.webContents.send('focus-change', true)
+      console.log('Overlay activated after load')
+    } catch (err) {
+      console.error('Failed to activate overlay after load', err)
+    }
+  })
 
   // Uncomment for debugging:
   // window.webContents.openDevTools({ mode: 'detach' })
@@ -674,11 +985,18 @@ function attachToTarget(title: string) {
     { hasTitleBarOnMac: true }
   )
 
-  OverlayController.activateOverlay()
+  
 
     // Proxy events to renderer
     ; (OverlayController as any).events.on('attach', (e: any) => {
       window.webContents.send('overlay-event', { type: 'attach', ...e })
+      try {
+        OverlayController.activateOverlay()
+        window.webContents.send('focus-change', true)
+        console.log('Defaulting to interactive after attach')
+      } catch (err) {
+        console.error('Failed to default to interactive after attach', err)
+      }
     })
     ; (OverlayController as any).events.on('moveresize', (e: any) => {
       window.webContents.send('overlay-event', { type: 'moveresize', ...e })
@@ -716,17 +1034,22 @@ function makeDemoInteractive() {
 
   globalShortcut.register(toggleMouseKey, toggleOverlayState)
 
+  globalShortcut.register('CmdOrCtrl+/', () => {
+    if (!window || !window.webContents) return
+    window.webContents.send('ui:open-help')
+  })
+
   function toggleVisibility() {
     if (!window || !window.webContents) {
       console.error('Window or webContents not available')
       return
     }
-
-    window.webContents.executeJavaScript(`
-      document.body.classList.toggle('hidden-ui');
-    `).catch(err => {
-      console.error('Failed to toggle visibility:', err)
-    })
+    try {
+      window.webContents.send('ui:toggle-visibility')
+      console.log('Sent ui:toggle-visibility')
+    } catch (err) {
+      console.error('Failed to send ui:toggle-visibility', err)
+    }
   }
 
   globalShortcut.register(toggleShowKey, toggleVisibility)
@@ -736,6 +1059,7 @@ function makeDemoInteractive() {
     {
       label: app.name,
       submenu: [
+        { label: 'Help', accelerator: 'CmdOrCtrl+/', click: () => window.webContents.send('ui:open-help') },
         { role: 'quit' }
       ]
     }
@@ -764,6 +1088,102 @@ function makeDemoInteractive() {
         // Handle the case where library is already initialized
         window.webContents.send('attach-error', error.message || 'Failed to attach to target window')
       }
+    }
+
+    if (type === 'send-text') {
+      const text: string = String(data || '')
+      if (!text.trim()) return
+
+      const correlationId = randomUUID();
+
+      (async () => {
+        try {
+          OverlayController.focusTarget()
+          
+          // 1. Try Nut.js first (Cross-platform)
+          try {
+            if (nutService.isAvailable()) {
+               await nutService.typeText(text, correlationId)
+               window.webContents.send('text-send', { ok: true, method: 'nutjs', correlationId })
+               OverlayController.activateOverlay()
+               return
+            } else {
+               // Emulate missing module status for consistency or just fall through
+               // But nutService.typeText throws if missing, so let's just try calling it
+               // if we want to rely on its internal check. 
+               // However, calling typeText when we know it's missing is cleaner.
+               await nutService.typeText(text, correlationId)
+            }
+          } catch (err: any) {
+             // Check if it's a module missing error or a typing error
+             if (err.message !== 'Nut.js module missing') {
+                console.error('Nut.js typing error', err)
+                // If it's a real typing error, we might stop here or try fallback.
+                // Given user wants reliability, let's try fallback but log the error.
+             }
+             // Fall through to platform-specific fallbacks
+          }
+
+          // 2. Fallbacks
+          if (process.platform === 'darwin') {
+            const { execFile } = require('node:child_process')
+            const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+            const t = esc(text)
+            const script = `tell application "TextEdit"\n` +
+                           `  activate\n` +
+                           `  if (count of windows) = 0 then make new document\n` +
+                           `  set existingText to text of front document\n` +
+                           `  set text of front document to existingText & "${t}"\n` +
+                           `end tell`;
+            
+            execFile('osascript', ['-e', script], (err: any) => {
+              if (err) {
+                console.error('AppleScript write failed', err)
+                // Fallback: clipboard + Cmd+V
+                try {
+                  clipboard.writeText(text)
+                  const pasteScript = `tell application "TextEdit" to activate\n` +
+                                      `delay 0.1\n` +
+                                      `tell application "System Events" to keystroke "v" using {command down}`
+                  execFile('osascript', ['-e', pasteScript], (err2: any) => {
+                    if (err2) {
+                      console.error('Fallback paste failed', err2)
+                      window.webContents.send('text-send', { ok: false, error: 'automation_or_accessibility_denied', correlationId })
+                      return
+                    }
+                    window.webContents.send('text-send', { ok: true, method: 'paste', correlationId })
+                    OverlayController.activateOverlay()
+                  })
+                } catch (fallbackErr) {
+                   window.webContents.send('text-send', { ok: false, error: 'fallback_error', correlationId })
+                }
+                return
+              }
+              window.webContents.send('text-send', { ok: true, method: 'applescript', correlationId })
+              OverlayController.activateOverlay()
+            })
+          } else if (process.platform === 'win32') {
+             const { execFile } = require('node:child_process')
+             const cmd = `$ws = New-Object -ComObject WScript.Shell; $ws.SendKeys('^v')`
+             clipboard.writeText(text)
+             execFile('powershell', ['-NoProfile', '-Command', cmd], (err: any) => {
+               if (err) {
+                 console.error('Failed to paste on Windows', err)
+                 window.webContents.send('attach-error', 'Failed to paste on Windows')
+                 window.webContents.send('text-send', { ok: false, error: 'paste_failed', correlationId })
+                 return
+               }
+               window.webContents.send('text-send', { ok: true, method: 'paste', correlationId })
+               OverlayController.activateOverlay()
+             })
+          } else {
+             window.webContents.send('attach-error', 'Send text not implemented on your platform')
+          }
+        } catch (error) {
+          console.error('Error during send-text', error)
+          window.webContents.send('text-send', { ok: false, error: 'exception', correlationId })
+        }
+      })()
     }
 
     if (type === 'position') {
@@ -796,7 +1216,7 @@ function makeDemoInteractive() {
 
     if (type === 'resize') {
       // Cycle through common sizes
-      const sizes = [[640, 480], [800, 600], [1024, 768], [900, 700]]
+      const sizes = [[1280, 800], [1600, 900], [1920, 1080], [900, 700]]
       const [currentW, currentH] = window.getSize()
       const currentIndex = sizes.findIndex(([w, h]) => w === currentW && h === currentH)
       const nextIndex = (currentIndex + 1) % sizes.length
@@ -805,6 +1225,7 @@ function makeDemoInteractive() {
       const [x, y] = window.getPosition()
       window.setBounds({ x, y, width: newW, height: newH })
     }
+
   })
 }
 
@@ -813,4 +1234,9 @@ app.on('ready', () => {
     createWindow,
     process.platform === 'linux' ? 1000 : 0
   )
+})
+
+// Quit the app when the window is closed (macOS red close button or any close request)
+app.on('window-all-closed', () => {
+  app.quit()
 })

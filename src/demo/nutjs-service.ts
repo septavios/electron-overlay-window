@@ -1,0 +1,101 @@
+import { EventEmitter } from 'events'
+
+export interface NutJsStatus {
+  stage: 'module-available' | 'module-missing' | 'typing-start' | 'typing-success' | 'typing-error'
+  correlationId: string
+  timestamp: number
+  details?: any
+  error?: string
+}
+
+export class NutJsService extends EventEmitter {
+  private nut: any = null
+
+  constructor(nutInstance?: any) {
+    super()
+    if (nutInstance) {
+      this.nut = nutInstance
+    } else {
+      try {
+        // Dynamic require to avoid build errors if not present
+        this.nut = require('@nut-tree/nut-js')
+      } catch (err) {
+        // Module not found or failed to load
+      }
+    }
+
+    if (this.nut && this.nut.keyboard && this.nut.keyboard.config) {
+      this.nut.keyboard.config.autoDelayMs = 10
+    }
+  }
+
+  isAvailable(): boolean {
+    return !!this.nut
+  }
+
+  async typeText(text: string, correlationId: string): Promise<void> {
+    // Capture start time
+    const startTimestamp = Date.now()
+
+    if (!this.nut) {
+      this.emit('status', {
+        stage: 'module-missing',
+        correlationId,
+        timestamp: startTimestamp,
+        details: { message: 'Nut.js dependency is not installed or failed to load' }
+      } as NutJsStatus)
+      throw new Error('Nut.js module missing')
+    }
+
+    this.emit('status', {
+      stage: 'module-available',
+      correlationId,
+      timestamp: startTimestamp,
+      details: { version: 'detected' }
+    } as NutJsStatus)
+
+    try {
+      // Emit start event
+      this.emit('status', {
+        stage: 'typing-start',
+        correlationId,
+        timestamp: Date.now(),
+        details: { 
+          length: text.length, 
+          preview: text.substring(0, 10) + (text.length > 10 ? '...' : '') 
+        }
+      } as NutJsStatus)
+
+      // Initial delay to ensure focus
+      await new Promise(resolve => setTimeout(resolve, 150))
+      
+      // Perform typing
+      await this.nut.keyboard.type(text)
+
+      // Emit success event
+      this.emit('status', {
+        stage: 'typing-success',
+        correlationId,
+        timestamp: Date.now(),
+        details: { 
+          confirmed: true,
+          charsSent: text.length
+        }
+      } as NutJsStatus)
+
+    } catch (err: any) {
+      const errorMessage = err?.message || String(err)
+      
+      // Emit error event
+      this.emit('status', {
+        stage: 'typing-error',
+        correlationId,
+        timestamp: Date.now(),
+        error: errorMessage,
+        details: { stack: err?.stack }
+      } as NutJsStatus)
+      
+      throw err
+    }
+  }
+}
