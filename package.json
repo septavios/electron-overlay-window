@@ -24,7 +24,34 @@
     "prebuild": "prebuildify --napi",
     "demo:electron": "node-gyp rebuild && npx tsc && electron dist/demo/electron-demo.js",
     "demo:mac": "npm run demo:electron",
-    "test": "npx tsc && node --test \"dist/demo/*.test.js\""
+    "test": "npx tsc && node --test \"dist/demo/*.test.js\"",
+    "build:demo": "node-gyp rebuild && npx tsc",
+    "dist": "npm run build:demo && electron-builder"
+  },
+  "build": {
+    "appId": "com.electron.overlay.demo",
+    "productName": "Electron Overlay Demo",
+    "mac": {
+      "target": {
+        "target": "dmg",
+        "arch": [
+          "arm64"
+        ]
+      }
+    },
+    "files": [
+      "dist/**/*",
+      "package.json",
+      "binding.gyp",
+      "src/lib/**/*",
+      "prebuilds/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "extraMetadata": {
+      "main": "dist/demo/electron-demo.js"
+    }
   },
   "files": [
     "dist/index.d.ts",
@@ -38,6 +65,7 @@
     "@types/node": "22.x.x",
     "@types/throttle-debounce": "5.x.x",
     "electron": "39.x.x",
+    "electron-builder": "^26.0.12",
     "prebuildify": "6.x.x",
     "typescript": "5.x.x"
   },
