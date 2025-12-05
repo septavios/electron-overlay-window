@@ -65,7 +65,9 @@ jobs:
       with:
         tag_name: v${{ steps.version.outputs.new_version }}
         name: Nightly v${{ steps.version.outputs.new_version }}
-        prerelease: true
+        prerelease: false
+        generate_release_notes: true
+        fail_on_unmatched_files: true
         files: release/*.dmg
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
