@@ -57,4 +57,41 @@ const keyboard = {
   }
 }
 
-module.exports = { keyboard, Key }
+const mouse = {
+  async moveRelative(dx, dy) {
+    const pos = libnut.getMousePos()
+    const x = Math.max(0, Math.round((pos && pos.x) ? pos.x + dx : dx))
+    const y = Math.max(0, Math.round((pos && pos.y) ? pos.y + dy : dy))
+    await libnut.moveMouse(x, y)
+  },
+  async click(button = 'left') {
+    await libnut.mouseClick(String(button))
+  },
+  async scroll(dx, dy) {
+    await libnut.scrollMouse(Math.round(dx || 0), Math.round(dy || 0))
+  }
+}
+
+const screen = {
+  async highlightActiveWindow(ms = 600) {
+    try {
+      const w = libnut.getActiveWindow()
+      const rect = libnut.getWindowRect(w)
+      if (rect && typeof rect.x === 'number') {
+        await libnut.highlight(rect.x, rect.y, rect.width, rect.height, Math.max(100, ms))
+      }
+    } catch {}
+  },
+  getActiveWindowInfo() {
+    try {
+      const w = libnut.getActiveWindow()
+      const title = libnut.getWindowTitle(w)
+      const rect = libnut.getWindowRect(w)
+      return { title, rect }
+    } catch (e) {
+      return { error: e && e.message }
+    }
+  }
+}
+
+module.exports = { keyboard, Key, mouse, screen }

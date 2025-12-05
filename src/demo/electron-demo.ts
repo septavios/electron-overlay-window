@@ -314,6 +314,37 @@ function createWindow() {
       -webkit-font-smoothing: antialiased;
       will-change: auto;
     }
+    .log-sidebar {
+      position: fixed;
+      right: 20px;
+      top: 20px;
+      bottom: 20px;
+      width: 320px;
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--glass-border);
+      border-radius: 12px;
+      padding: 12px;
+      z-index: 101;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+    .log-sidebar .log-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .log-sidebar .log-title {
+      font-weight: 600;
+      color: var(--accent);
+    }
+    .log-sidebar .log-container {
+      position: relative;
+      height: calc(100% - 36px);
+      max-height: none;
+      overflow-y: auto;
+    }
     .log-entry {
       margin-bottom: 2px;
       color: var(--text-muted);
@@ -593,14 +624,8 @@ function createWindow() {
       </div>
     </div>
 
-    <!-- Event Log -->
-    <div class="section" id="sectionLog">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-        <div class="section-title" style="margin: 0;">Event Log <span class="chev"></span></div>
-        <button class="small" id="btnClearLog">Clear</button>
-      </div>
-      <div class="log-container" id="eventLog"></div>
-    </div>
+    <!-- Event Log (moved to right sidebar) -->
+    <div class="section" id="sectionLog" style="display:none"></div>
 
     <!-- Tour -->
     <div class="section" id="sectionHelp">
@@ -617,6 +642,12 @@ function createWindow() {
         <button id="btnRichText">Rich Text Demo</button>
         <button id="btnCopyDemo">Copy Demo</button>
       </div>
+      <div class="grid-2" style="margin-top: 8px;">
+        <button id="btnNutMouseMove">Nut.js: Move Mouse +50px</button>
+        <button id="btnNutMouseClick">Nut.js: Click Left</button>
+        <button id="btnNutHighlight">Nut.js: Highlight Active Window</button>
+        <button id="btnNutWindowInfo">Nut.js: Active Window Info</button>
+      </div>
       <div style="display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; align-items: center;">
         <input type="text" id="inputMsg" placeholder="Text to simulate..." style="flex: 1;">
         <button id="btnSendNut" class="small primary" title="Use nut.js">Send (nut.js)</button>
@@ -624,6 +655,15 @@ function createWindow() {
         <button id="btnSendText" class="small" style="display:none"></button>
       </div>
     </div>
+  </div>
+
+  <!-- Right Sidebar: Event Log -->
+  <div class="log-sidebar" id="logSidebar">
+    <div class="log-header">
+      <div class="log-title">Event Log</div>
+      <button class="small" id="btnClearLog">Clear</button>
+    </div>
+    <div class="log-container" id="eventLog"></div>
   </div>
 
   <div class="heavy-list" id="heavyList"></div>
@@ -856,6 +896,15 @@ function createWindow() {
         }
       };
     }
+    // Nut.js showcase buttons
+    const btnNutMouseMove = document.getElementById('btnNutMouseMove');
+    const btnNutMouseClick = document.getElementById('btnNutMouseClick');
+    const btnNutHighlight = document.getElementById('btnNutHighlight');
+    const btnNutWindowInfo = document.getElementById('btnNutWindowInfo');
+    if (btnNutMouseMove) btnNutMouseMove.onclick = () => { log('CMD', 'Nut.js mouse move (+50,+0)'); ipc.send('action', 'nut-mouse-move', { dx: 50, dy: 0 }) }
+    if (btnNutMouseClick) btnNutMouseClick.onclick = () => { log('CMD', 'Nut.js mouse click (left)'); ipc.send('action', 'nut-mouse-click', 'left') }
+    if (btnNutHighlight) btnNutHighlight.onclick = () => { log('CMD', 'Nut.js highlight active window'); ipc.send('action', 'nut-highlight', 700) }
+    if (btnNutWindowInfo) btnNutWindowInfo.onclick = () => { ipc.send('action', 'nut-window-info') }
     if (btnSendApple) {
       btnSendApple.onclick = () => {
         const text = inputMsg.value;
@@ -1132,6 +1181,13 @@ function createWindow() {
       }
     })
 
+    ipc.on('log', (payload) => {
+      if (!payload) return
+      const t = String(payload.type || 'INFO')
+      const m = String(payload.message || '')
+      log(t, m)
+    })
+
     ipc.on('input-method', (payload) => {
       if (!payload || !payload.method) return
       const id = payload.correlationId ? String(payload.correlationId) : ''
@@ -1323,7 +1379,7 @@ function makeDemoInteractive() {
 
   // IPC
   let heavyEnabled = false
-  ipcMain.on('action', (_e: any, type: string, data?: any) => {
+  ipcMain.on('action', async (_e: any, type: string, data?: any) => {
     if (type === 'toggle-click') toggleOverlayState()
 
     if (type === 'quit') {
@@ -1346,6 +1402,47 @@ function makeDemoInteractive() {
       } catch (error: any) {
         // Handle the case where library is already initialized
         window.webContents.send('attach-error', error.message || 'Failed to attach to target window')
+      }
+    }
+
+    if (type === 'nut-mouse-move') {
+      try {
+        const { dx = 50, dy = 0 } = (data || {})
+        await nutService.mouseMoveDemo(dx, dy)
+        window.webContents.send('log', { type: 'NUT', message: `Mouse moved by (${dx}, ${dy})` })
+      } catch (err: any) {
+        window.webContents.send('log', { type: 'ERROR', message: `Mouse move failed: ${err && err.message}` })
+      }
+    }
+
+    if (type === 'nut-mouse-click') {
+      try {
+        const button = String(data || 'left')
+        await nutService.mouseClickDemo(button)
+        window.webContents.send('log', { type: 'NUT', message: `Mouse click: ${button}` })
+      } catch (err: any) {
+        window.webContents.send('log', { type: 'ERROR', message: `Mouse click failed: ${err && err.message}` })
+      }
+    }
+
+    if (type === 'nut-highlight') {
+      try {
+        const ms = Number(data || 700)
+        await nutService.highlightActiveWindow(ms)
+        window.webContents.send('log', { type: 'NUT', message: `Highlighted active window (${ms}ms)` })
+      } catch (err: any) {
+        window.webContents.send('log', { type: 'ERROR', message: `Highlight failed: ${err && err.message}` })
+      }
+    }
+
+    if (type === 'nut-window-info') {
+      try {
+        const info = nutService.getActiveWindowInfo()
+        const title = info && info.title ? String(info.title) : 'unknown'
+        const rect = info && info.rect ? info.rect : {}
+        window.webContents.send('log', { type: 'NUT', message: `Active window: ${title} @ ${rect.x || 0},${rect.y || 0} ${rect.width || 0}x${rect.height || 0}` })
+      } catch (err: any) {
+        window.webContents.send('log', { type: 'ERROR', message: `Window info failed: ${err && err.message}` })
       }
     }
 

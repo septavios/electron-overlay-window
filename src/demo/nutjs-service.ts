@@ -116,6 +116,26 @@ export class NutJsService extends EventEmitter {
       throw err
     }
   }
+
+  async mouseMoveDemo(dx: number, dy: number): Promise<void> {
+    if (!this.nut || !this.nut.mouse) throw new Error('Nut.js module missing')
+    await this.nut.mouse.moveRelative(dx, dy)
+  }
+
+  async mouseClickDemo(button: string = 'left'): Promise<void> {
+    if (!this.nut || !this.nut.mouse) throw new Error('Nut.js module missing')
+    await this.nut.mouse.click(button)
+  }
+
+  async highlightActiveWindow(ms: number = 700): Promise<void> {
+    if (!this.nut || !this.nut.screen) throw new Error('Nut.js module missing')
+    await this.nut.screen.highlightActiveWindow(ms)
+  }
+
+  getActiveWindowInfo(): any {
+    if (!this.nut || !this.nut.screen) throw new Error('Nut.js module missing')
+    return this.nut.screen.getActiveWindowInfo()
+  }
   async performRichTextAutomation(text: string, correlationId: string): Promise<void> {
     if (!this.nut) throw new Error('Nut.js module missing')
 
