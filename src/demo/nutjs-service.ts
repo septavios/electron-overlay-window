@@ -60,15 +60,15 @@ export class NutJsService extends EventEmitter {
         stage: 'typing-start',
         correlationId,
         timestamp: Date.now(),
-        details: { 
-          length: text.length, 
-          preview: text.substring(0, 10) + (text.length > 10 ? '...' : '') 
+        details: {
+          length: text.length,
+          preview: text.substring(0, 10) + (text.length > 10 ? '...' : '')
         }
       } as NutJsStatus)
 
       // Initial delay to ensure focus
       await new Promise(resolve => setTimeout(resolve, 150))
-      
+
       // Perform typing
       await this.nut.keyboard.type(text)
 
@@ -77,7 +77,7 @@ export class NutJsService extends EventEmitter {
         stage: 'typing-success',
         correlationId,
         timestamp: Date.now(),
-        details: { 
+        details: {
           confirmed: true,
           charsSent: text.length
         }
@@ -85,7 +85,7 @@ export class NutJsService extends EventEmitter {
 
     } catch (err: any) {
       const errorMessage = err?.message || String(err)
-      
+
       // Emit error event
       this.emit('status', {
         stage: 'typing-error',
@@ -94,7 +94,122 @@ export class NutJsService extends EventEmitter {
         error: errorMessage,
         details: { stack: err?.stack }
       } as NutJsStatus)
-      
+
+      throw err
+    }
+  }
+  async performRichTextAutomation(text: string, correlationId: string): Promise<void> {
+    if (!this.nut) throw new Error('Nut.js module missing')
+
+    const startTimestamp = Date.now()
+    this.emit('status', {
+      stage: 'typing-start',
+      correlationId,
+      timestamp: startTimestamp,
+      details: { length: text.length, mode: 'rich-text' }
+    } as NutJsStatus)
+
+    try {
+      const { Key } = this.nut
+
+      // 1. Type text
+      await new Promise(resolve => setTimeout(resolve, 200)) // Focus delay
+      await this.nut.keyboard.type(text)
+
+      // 2. Select text (Shift + Left x N)
+      // Wait a bit
+      await new Promise(resolve => setTimeout(resolve, 200))
+      await this.nut.keyboard.pressKey(Key.LeftShift)
+      for (let i = 0; i < text.length; i++) {
+        await this.nut.keyboard.type(Key.Left)
+      }
+      await this.nut.keyboard.releaseKey(Key.LeftShift)
+
+      // 3. Bold (Cmd + B)
+      await new Promise(resolve => setTimeout(resolve, 300))
+      await this.nut.keyboard.pressKey(Key.LeftCmd)
+      await this.nut.keyboard.type(Key.B)
+      await this.nut.keyboard.releaseKey(Key.LeftCmd)
+
+      // 4. Move cursor to end (Right)
+      await new Promise(resolve => setTimeout(resolve, 200))
+      await this.nut.keyboard.type(Key.Right)
+
+      this.emit('status', {
+        stage: 'typing-success',
+        correlationId,
+        timestamp: Date.now(),
+        details: { confirmed: true }
+      } as NutJsStatus)
+
+    } catch (err: any) {
+      this.emit('status', {
+        stage: 'typing-error',
+        correlationId,
+        timestamp: Date.now(),
+        error: err.message
+      } as NutJsStatus)
+      throw err
+    }
+  }
+
+  async performClipboardDemo(text: string, correlationId: string): Promise<void> {
+    if (!this.nut) throw new Error('Nut.js module missing')
+
+    const startTimestamp = Date.now()
+    this.emit('status', {
+      stage: 'typing-start',
+      correlationId,
+      timestamp: startTimestamp,
+      details: { length: text.length, mode: 'clipboard-demo' }
+    } as NutJsStatus)
+
+    try {
+      const { Key } = this.nut
+
+      // 1. Type text
+      await new Promise(resolve => setTimeout(resolve, 200))
+      await this.nut.keyboard.type(text)
+
+      // 2. Select All (Cmd+A)
+      await new Promise(resolve => setTimeout(resolve, 300))
+      await this.nut.keyboard.pressKey(Key.LeftCmd)
+      await this.nut.keyboard.type(Key.A)
+      await this.nut.keyboard.releaseKey(Key.LeftCmd)
+
+      // 3. Copy (Cmd+C)
+      await new Promise(resolve => setTimeout(resolve, 300))
+      await this.nut.keyboard.pressKey(Key.LeftCmd)
+      await this.nut.keyboard.type(Key.C)
+      await this.nut.keyboard.releaseKey(Key.LeftCmd)
+
+      // 4. Move Right (deselect)
+      await new Promise(resolve => setTimeout(resolve, 200))
+      await this.nut.keyboard.type(Key.Right)
+
+      // 5. Type separator
+      await this.nut.keyboard.type(' -> Pasted: ')
+
+      // 6. Paste (Cmd+V)
+      await new Promise(resolve => setTimeout(resolve, 300))
+      await this.nut.keyboard.pressKey(Key.LeftCmd)
+      await this.nut.keyboard.type(Key.V)
+      await this.nut.keyboard.releaseKey(Key.LeftCmd)
+
+      this.emit('status', {
+        stage: 'typing-success',
+        correlationId,
+        timestamp: Date.now(),
+        details: { confirmed: true }
+      } as NutJsStatus)
+
+    } catch (err: any) {
+      this.emit('status', {
+        stage: 'typing-error',
+        correlationId,
+        timestamp: Date.now(),
+        error: err.message
+      } as NutJsStatus)
       throw err
     }
   }

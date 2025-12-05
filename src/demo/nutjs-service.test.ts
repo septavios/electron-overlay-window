@@ -42,7 +42,7 @@ describe('NutJsService', () => {
 
     // Should have 3 events: module-available, typing-start, typing-success
     assert.strictEqual(events.length, 3)
-    
+
     assert.strictEqual(events[0].stage, 'module-available')
     assert.strictEqual(events[0].correlationId, correlationId)
 
@@ -85,5 +85,50 @@ describe('NutJsService', () => {
     assert.strictEqual(events[2].stage, 'typing-error')
     assert.strictEqual(events[2].error, 'Keyboard jammed')
     assert.strictEqual(events[2].correlationId, correlationId)
+  })
+  it('should perform rich text automation sequence', async () => {
+    const mockType = mock.fn(async () => Promise.resolve())
+    const mockPressKey = mock.fn(async () => Promise.resolve())
+    const mockReleaseKey = mock.fn(async () => Promise.resolve())
+
+    const mockNut = {
+      Key: {
+        Left: 'Left',
+        Right: 'Right',
+        LeftShift: 'LeftShift',
+        LeftCmd: 'LeftCmd',
+        B: 'B'
+      },
+      keyboard: {
+        config: {},
+        type: mockType,
+        pressKey: mockPressKey,
+        releaseKey: mockReleaseKey
+      }
+    }
+
+    const service = new NutJsService(mockNut)
+    const correlationId = 'test-corr-rich'
+
+    await service.performRichTextAutomation('foo', correlationId)
+
+    // Verify sequence
+    // 1. type text
+    assert.strictEqual((mockType.mock.calls[0].arguments as any[])[0], 'foo')
+
+    // 2. Select text (Shift + Left x 3)
+    assert.strictEqual((mockPressKey.mock.calls[0].arguments as any[])[0], 'LeftShift')
+    assert.strictEqual((mockType.mock.calls[1].arguments as any[])[0], 'Left')
+    assert.strictEqual((mockType.mock.calls[2].arguments as any[])[0], 'Left')
+    assert.strictEqual((mockType.mock.calls[3].arguments as any[])[0], 'Left')
+    assert.strictEqual((mockReleaseKey.mock.calls[0].arguments as any[])[0], 'LeftShift')
+
+    // 3. Bold (Cmd + B)
+    assert.strictEqual((mockPressKey.mock.calls[1].arguments as any[])[0], 'LeftCmd')
+    assert.strictEqual((mockType.mock.calls[4].arguments as any[])[0], 'B')
+    assert.strictEqual((mockReleaseKey.mock.calls[1].arguments as any[])[0], 'LeftCmd')
+
+    // 4. Move Right
+    assert.strictEqual((mockType.mock.calls[5].arguments as any[])[0], 'Right')
   })
 })

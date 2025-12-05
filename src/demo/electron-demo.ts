@@ -573,6 +573,8 @@ function createWindow() {
       <div class="grid-2">
         <button id="btnBorder">Toggle Border</button>
         <button id="btnAutoClick">Auto Clicker</button>
+        <button id="btnRichText">Rich Text Demo</button>
+        <button id="btnCopyDemo">Copy Demo</button>
       </div>
       <div style="display: flex; gap: 4px; margin-top: 6px;">
         <input type="text" id="inputMsg" placeholder="Text to simulate..." style="flex: 1;">
@@ -782,6 +784,18 @@ function createWindow() {
           }, 200);
         }, 1000);
       }
+    };
+
+    document.getElementById('btnRichText').onclick = () => {
+      const text = inputMsg.value || 'Auto Text';
+      log('CMD', 'Starting Rich Text Demo with: ' + text);
+      ipc.send('action', 'rich-text-demo', text);
+    };
+
+    document.getElementById('btnCopyDemo').onclick = () => {
+      const text = inputMsg.value || 'Clipboard Test';
+      log('CMD', 'Starting Copy Demo with: ' + text);
+      ipc.send('action', 'clipboard-demo', text);
     };
 
     // Tour
@@ -1021,12 +1035,14 @@ function createWindow() {
       if (payload.stage === 'module-available') {
         log('NUT', cid + ' nut.js available')
       } else if (payload.stage === 'module-missing') {
-        log('NUT', cid + ' nut.js module missing, using fallback')
+        const msg = (payload.details && payload.details.message) ? payload.details.message : 'nut.js module missing, using fallback'
+        log('NUT', cid + ' ' + msg)
       } else if (payload.stage === 'typing-start') {
         const details = payload.details || {}
         log('NUT', cid + ' Typing started (' + (details.length || 0) + ' chars): ' + (details.preview || ''))
       } else if (payload.stage === 'typing-success') {
-        log('NUT', cid + ' Typing success. Confirmed.')
+        const msg = (payload.details && payload.details.message) ? payload.details.message : 'Typing success. Confirmed.'
+        log('NUT', cid + ' ' + msg)
       } else if (payload.stage === 'typing-error') {
         const msg = String(payload.error || 'unknown error')
         log('NUT', cid + ' Typing error: ' + msg)
@@ -1376,6 +1392,176 @@ function makeDemoInteractive() {
       window.setBounds({ x, y, width: newW, height: newH })
     }
 
+    if (type === 'rich-text-demo') {
+      const text: string = String(data || 'Hello World')
+      const correlationId = randomUUID();
+
+      (async () => {
+        try {
+          OverlayController.focusTarget()
+
+          if (nutService.isAvailable()) {
+            await nutService.performRichTextAutomation(text, correlationId)
+            window.webContents.send('nutjs-status', {
+              stage: 'typing-success',
+              correlationId,
+              details: { message: 'Rich text demo completed' }
+            })
+            OverlayController.activateOverlay()
+          } else {
+            // Fallback for macOS
+            if (process.platform === 'darwin') {
+              window.webContents.send('nutjs-status', {
+                stage: 'module-missing',
+                correlationId,
+                details: { message: 'Nut.js missing, using macOS fallback...' }
+              })
+
+              const { execFile } = require('node:child_process')
+              const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+              const t = esc(text)
+
+              // AppleScript to: 1. Type, 2. Select (Shift+Left * len), 3. Bold (Cmd+B), 4. Move Right
+              const script = `
+                 tell application "System Events"
+                   delay 0.2
+                   keystroke "${t}"
+                   delay 0.2
+                   repeat ${text.length} times
+                     key code 123 using {shift down} -- Left Arrow + Shift
+                     delay 0.01
+                   end repeat
+                   delay 0.2
+                   keystroke "b" using {command down} -- Bold
+                   delay 0.2
+                   key code 124 -- Right Arrow
+                 end tell
+               `
+
+              execFile('osascript', ['-e', script], (err: any) => {
+                if (err) {
+                  console.error('AppleScript fallback failed', err)
+                  window.webContents.send('nutjs-status', {
+                    stage: 'typing-error',
+                    correlationId,
+                    error: 'Fallback mechanism failed: ' + err.message
+                  })
+                  OverlayController.activateOverlay() // Activate overlay even on error
+                  return
+                }
+                window.webContents.send('nutjs-status', {
+                  stage: 'typing-success',
+                  correlationId,
+                  details: { message: 'Rich text demo completed (via AppleScript)' }
+                })
+                OverlayController.activateOverlay()
+              })
+            } else {
+              window.webContents.send('nutjs-status', {
+                stage: 'module-missing',
+                correlationId,
+                details: { message: 'Nut.js required for rich text demo on this platform' }
+              })
+              OverlayController.activateOverlay() // Activate overlay after sending message
+            }
+          }
+        } catch (err: any) {
+          console.error('Rich text demo failed', err)
+          window.webContents.send('nutjs-status', {
+            stage: 'typing-error',
+            correlationId,
+            error: err.message
+          })
+          OverlayController.activateOverlay()
+        }
+      })()
+    }
+
+    if (type === 'clipboard-demo') {
+      const text: string = String(data || 'Clipboard Test')
+      const correlationId = randomUUID();
+
+      (async () => {
+        try {
+          OverlayController.focusTarget()
+
+          if (nutService.isAvailable()) {
+            await nutService.performClipboardDemo(text, correlationId)
+            window.webContents.send('nutjs-status', {
+              stage: 'typing-success',
+              correlationId,
+              details: { message: 'Clipboard demo completed' }
+            })
+            OverlayController.activateOverlay()
+          } else {
+            if (process.platform === 'darwin') {
+              window.webContents.send('nutjs-status', {
+                stage: 'module-missing',
+                correlationId,
+                details: { message: 'Nut.js missing, using macOS fallback...' }
+              })
+
+              const { execFile } = require('node:child_process')
+              const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+              const t = esc(text)
+
+              // AppleScript: Type, Select All, Copy, Move Right, Paste
+              const script = `
+                 tell application "System Events"
+                   delay 0.2
+                   keystroke "${t}"
+                   delay 0.2
+                   keystroke "a" using {command down} -- Select All
+                   delay 0.2
+                   keystroke "c" using {command down} -- Copy
+                   delay 0.2
+                   key code 124 -- Right Arrow (deselect)
+                   delay 0.2
+                   keystroke " -> Pasted: "
+                   delay 0.2
+                   keystroke "v" using {command down} -- Paste
+                 end tell
+               `
+
+              execFile('osascript', ['-e', script], (err: any) => {
+                if (err) {
+                  console.error('AppleScript clipboard fallback failed', err)
+                  window.webContents.send('nutjs-status', {
+                    stage: 'typing-error',
+                    correlationId,
+                    error: 'Fallback mechanism failed: ' + err.message
+                  })
+                  OverlayController.activateOverlay()
+                  return
+                }
+                window.webContents.send('nutjs-status', {
+                  stage: 'typing-success',
+                  correlationId,
+                  details: { message: 'Clipboard demo completed (via AppleScript)' }
+                })
+                OverlayController.activateOverlay()
+              })
+            } else {
+              window.webContents.send('nutjs-status', {
+                stage: 'module-missing',
+                correlationId,
+                details: { message: 'Nut.js required for clipboard demo on this platform' }
+              })
+              OverlayController.activateOverlay()
+            }
+          }
+
+        } catch (err: any) {
+          console.error('Clipboard demo failed', err)
+          window.webContents.send('nutjs-status', {
+            stage: 'typing-error',
+            correlationId,
+            error: err.message
+          })
+          OverlayController.activateOverlay()
+        }
+      })()
+    }
   })
 }
 
