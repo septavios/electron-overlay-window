@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, Menu, ipcMain, clipboard } from 'electron'
+import { app, BrowserWindow, globalShortcut, Menu, ipcMain, clipboard, dialog } from 'electron'
 import { join } from 'node:path'
 import { OverlayController, OVERLAY_WINDOW_OPTS } from '../'
 import { NutJsService } from './nutjs-service'
@@ -32,6 +32,22 @@ function createWindow() {
       sandbox: true
     },
     ...OVERLAY_WINDOW_OPTS
+  })
+
+  window.on('close', (e) => {
+    const choice = dialog.showMessageBoxSync(window, {
+      type: 'question',
+      buttons: ['Quit', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Confirm Quit',
+      message: 'Are you sure you want to quit?',
+      detail: 'Any unsaved changes may be lost.'
+    })
+
+    if (choice === 1) {
+      e.preventDefault()
+    }
   })
 
   const html = `
@@ -441,7 +457,10 @@ function createWindow() {
         <div class="status-dot active" id="statusDot"></div>
         Electron Overlay Demo
       </div>
-      <div style="font-size: 10px; color: var(--text-muted);">v4.0.1</div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <div style="font-size: 10px; color: var(--text-muted);">v4.0.1</div>
+        <button id="btnQuit" class="small" style="background: var(--danger); border-color: var(--danger); color: white; min-width: 24px; padding: 2px 8px;">✕</button>
+      </div>
     </div>
 
     <!-- Core Controls -->
@@ -637,6 +656,9 @@ function createWindow() {
       } catch (err) {
         log('ERROR', 'Failed to send toggle-click')
       }
+    };
+    document.getElementById('btnQuit').onclick = () => {
+      ipc.send('action', 'quit')
     };
     document.getElementById('btnToggleVis').onclick = () => {
       try {
@@ -869,10 +891,6 @@ function createWindow() {
         warning.style.display = state ? 'none' : 'block';
       }
       document.body.classList.toggle('passthrough-mode', !state);
-      // Only auto-hide UI in passthrough when not manually overridden
-      if (!isUIHiddenManual) {
-        document.body.classList.toggle('hidden-ui', !state);
-      }
       
       log('MODE', state ? 'Interactive' : 'Passthrough');
       setTimeout(() => document.body.classList.remove('mode-transition'), 180)
@@ -952,6 +970,12 @@ function createWindow() {
       } catch (err) {
         log('ERROR', 'Failed to toggle UI visibility')
       }
+    })
+
+    ipc.on('ui:ensure-visible', () => {
+      isUIHiddenManual = false
+      document.body.classList.remove('hidden-ui')
+      log('UI', 'UI visibility reset')
     })
 
     ipc.on('ui:open-help', () => startTour());
@@ -1137,9 +1161,11 @@ function makeDemoInteractive() {
         window.hide()
       } else {
         window.show()
+        isInteractable = true
         try {
           OverlayController.activateOverlay()
           window.webContents.send('focus-change', true)
+          window.webContents.send('ui:ensure-visible')
         } catch { }
       }
     } catch (err) {
@@ -1190,6 +1216,10 @@ function makeDemoInteractive() {
   let heavyEnabled = false
   ipcMain.on('action', (_e: any, type: string, data?: any) => {
     if (type === 'toggle-click') toggleOverlayState()
+
+    if (type === 'quit') {
+      window.close()
+    }
 
     if (type === 'toggle-visibility') {
       toggleVisibility()
