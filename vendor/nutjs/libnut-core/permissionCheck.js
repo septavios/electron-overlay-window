@@ -87,11 +87,11 @@ try {
       askForScreenRecording(originalFunction, functionName)(...args);
   }
 } catch (e) {
-  console.warn(
-    `Encountered error establishing macOS permission checks:`,
-    e.message
-  );
-  console.warn(`Returning original module.`);
+  try {
+    if (process.env.DEBUG_PERMISSIONS === '1') {
+      console.warn(`mac-permissions not available:`, e && e.message)
+    }
+  } catch {}
   libnut = require("bindings")("libnut");
 } finally {
   module.exports = libnut;

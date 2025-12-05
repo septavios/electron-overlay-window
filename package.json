@@ -37,6 +37,11 @@
         "arch": [
           "arm64"
         ]
+      },
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "Allows automation to send Apple Events to TextEdit for demo purposes.",
+        "NSMicrophoneUsageDescription": "Not used by this demo; placeholder for future features.",
+        "NSCameraUsageDescription": "Not used by this demo; placeholder for future features."
       }
     },
     "files": [
@@ -72,7 +77,8 @@
   "dependencies": {
     "node-gyp-build": "4.x.x",
     "throttle-debounce": "5.x.x",
-    "@nut-tree/nut-js": "file:vendor/nutjs"
+    "@nut-tree/nut-js": "file:vendor/nutjs",
+    "node-mac-permissions": "^3.2.0"
   },
   "gypfile": true,
   "engines": {

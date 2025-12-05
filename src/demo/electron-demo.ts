@@ -1,4 +1,6 @@
 import { app, BrowserWindow, globalShortcut, Menu, ipcMain, clipboard, dialog } from 'electron'
+let macPermissions: any
+try { macPermissions = require('node-mac-permissions') } catch {}
 import { join } from 'node:path'
 import { OverlayController, OVERLAY_WINDOW_OPTS } from '../'
 import { NutJsService } from './nutjs-service'
@@ -34,6 +36,22 @@ function createWindow() {
     ...OVERLAY_WINDOW_OPTS
   })
 
+  try {
+    if (process.platform === 'darwin' && macPermissions) {
+      const statusAcc = macPermissions.getAuthStatus('accessibility')
+      const statusScreen = macPermissions.getAuthStatus('screen')
+      const statusInput = macPermissions.getAuthStatus('input-monitoring')
+      const idShort = '[perm]'
+      const logPerm = (type: string, status: string) => {
+        window.webContents.send('log', { type: 'PERM', message: `${idShort} ${type} is ${status}` })
+      }
+      logPerm('accessibility', statusAcc)
+      logPerm('screen', statusScreen)
+      logPerm('input-monitoring', statusInput)
+      if (statusAcc !== 'authorized') macPermissions.askForAccessibilityAccess()
+    }
+  } catch {}
+
   window.on('close', (e) => {
     const choice = dialog.showMessageBoxSync(window, {
       type: 'question',
@@ -59,7 +77,7 @@ function createWindow() {
   <title>Overlay Demo</title>
   <style>
     :root {
-      --glass-bg: rgba(20, 20, 20, 0.85);
+      --glass-bg: rgba(20, 20, 20, 1.0);
       --glass-border: rgba(255, 255, 255, 0.1);
       --accent: #3b82f6;
       --accent-hover: #2563eb;
@@ -372,10 +390,30 @@ function createWindow() {
     }
 
     /* Highlight Border Feature */
-    body.border-active {
-      box-shadow: inset 0 0 0 4px var(--danger);
-      transition: box-shadow 0.3s;
+    @keyframes borderPulse {
+      0% { box-shadow: 0 0 0 2px rgba(255,255,255,0.30), 0 0 16px 4px rgba(59,130,246,0.45), inset 0 0 0 2px rgba(255,255,255,0.15); }
+      50% { box-shadow: 0 0 0 2px rgba(255,255,255,0.60), 0 0 28px 8px rgba(59,130,246,0.75), inset 0 0 0 2px rgba(255,255,255,0.30); }
+      100% { box-shadow: 0 0 0 2px rgba(255,255,255,0.30), 0 0 16px 4px rgba(59,130,246,0.45), inset 0 0 0 2px rgba(255,255,255,0.15); }
     }
+    body.border-active {
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.55), 0 0 24px 6px rgba(59,130,246,0.65), inset 0 0 0 2px rgba(255,255,255,0.2);
+      animation: borderPulse 1.8s ease-in-out infinite;
+    }
+
+    .border-frame {
+      position: fixed;
+      top: 4px;
+      left: 4px;
+      right: 4px;
+      bottom: 4px;
+      border: 8px solid rgba(59,130,246,0.9);
+      border-radius: 12px;
+      box-shadow: 0 0 24px 10px rgba(59,130,246,0.55), inset 0 0 0 3px rgba(255,255,255,0.3);
+      pointer-events: none;
+      z-index: 9999;
+      display: none;
+    }
+    body.border-active .border-frame { display: block; }
 
     /* Fake Cursor for Auto Clicker */
     #fakeCursor {
@@ -486,9 +524,9 @@ function createWindow() {
       <div class="slider-container">
         <div class="slider-label">
           <span>Background Opacity</span>
-          <span id="opacityValue">85%</span>
+          <span id="opacityValue">100%</span>
         </div>
-        <input type="range" id="opacitySlider" min="0" max="100" value="85">
+        <input type="range" id="opacitySlider" min="0" max="100" value="100">
       </div>
     </div>
 
@@ -590,6 +628,7 @@ function createWindow() {
 
   <div class="heavy-list" id="heavyList"></div>
   <div id="fakeCursor"></div>
+  <div class="border-frame" id="borderFrame"></div>
   <div id="toastMsg">Message sent</div>
   <button class="sticky-help hidden" id="stickyHelp" aria-label="Open Help (CmdOrCtrl+/)">Help</button>
 
@@ -934,6 +973,7 @@ function createWindow() {
 
     // IPC Listeners
     ipc.on('focus-change', (state) => {
+      if (state === isInteractive) return;
       isInteractive = state;
       document.body.classList.add('mode-transition')
       statusDot.className = state ? 'status-dot active' : 'status-dot inactive';
@@ -1190,9 +1230,6 @@ function makeDemoInteractive() {
   let isInteractable = true
 
   function toggleOverlayState() {
-    if (window && window.webContents) {
-      try { window.webContents.send('focus-change', !isInteractable) } catch { }
-    }
     if (isInteractable) {
       isInteractable = false
       OverlayController.focusTarget()
@@ -1361,6 +1398,13 @@ function makeDemoInteractive() {
               `  set text of front document to existingText & "${t}"\n` +
               `end tell`;
             try { window.webContents.send('input-method', { method: 'applescript', correlationId }) } catch {}
+            try {
+              if (process.platform === 'darwin' && macPermissions && macPermissions.askForAppleEventsAccess) {
+                const result = await macPermissions.askForAppleEventsAccess('com.apple.TextEdit', true)
+                const idShort = correlationId ? '[' + String(correlationId).slice(0,6) + ']' : ''
+                window.webContents.send('log', { type: 'PERM', message: `${idShort} apple-events ${result}` })
+              }
+            } catch {}
             try { window.webContents.send('input-start', { method: 'applescript', correlationId, length: text.length }) } catch {}
 
             execFile('osascript', ['-e', script], (err: any) => {
@@ -1726,3 +1770,4 @@ app.on('will-quit', () => {
 app.on('window-all-closed', () => {
   app.quit()
 })
+ 
