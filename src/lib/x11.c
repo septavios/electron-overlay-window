@@ -331,3 +331,10 @@ void ow_focus_target() {
   xcb_flush(x_conn);
   free(event);
 }
+
+void ow_stop_hook() {
+  if (x_conn != NULL) {
+    xcb_disconnect(x_conn);
+    x_conn = NULL;
+  }
+}

@@ -26,6 +26,7 @@ struct ow_overlay_window
 static HWND foreground_window = NULL;
 static HWINEVENTHOOK fg_window_namechange_hook = NULL;
 static UINT WM_OVERLAY_UIPI_TEST = WM_NULL;
+static DWORD hook_thread_id = 0;
 
 static struct ow_target_window target_info = {
   .title = NULL,
@@ -309,6 +310,7 @@ static VOID CALLBACK foreground_timer_proc(HWND _hwnd, UINT msg, UINT_PTR timerI
 }
 
 static void hook_thread(void* _arg) {
+  hook_thread_id = GetCurrentThreadId();
   SetWinEventHook(
     EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
     NULL, hook_proc, 0, 0, WINEVENT_OUTOFCONTEXT);
@@ -332,6 +334,25 @@ static void hook_thread(void* _arg) {
   while (GetMessageW(&message, (HWND)NULL, 0, 0) != FALSE) {
     TranslateMessage(&message);
     DispatchMessageW(&message);
+  }
+}
+
+void ow_stop_hook() {
+  KillTimer(NULL, 0);
+  if (target_info.location_hook) {
+    UnhookWinEvent(target_info.location_hook);
+    target_info.location_hook = NULL;
+  }
+  if (target_info.destroy_hook) {
+    UnhookWinEvent(target_info.destroy_hook);
+    target_info.destroy_hook = NULL;
+  }
+  if (fg_window_namechange_hook != NULL) {
+    UnhookWinEvent(fg_window_namechange_hook);
+    fg_window_namechange_hook = NULL;
+  }
+  if (hook_thread_id != 0) {
+    PostThreadMessageW(hook_thread_id, WM_QUIT, 0, 0);
   }
 }
 

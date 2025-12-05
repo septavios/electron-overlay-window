@@ -84,6 +84,7 @@ static struct ow_frontmost_app frontmostInfo = {
     .pid = -1, .windowID = 0, .element = NULL, .observer = NULL};
 
 static OWFullscreenObserver *fullscreenObserver = NULL;
+static CFRunLoopRef hookRunLoop = NULL;
 
 // Window notifications: these are attached to the target window.
 // These must be handled by `hookProcTargetWindow`.
@@ -630,6 +631,8 @@ static void hookThread(void *_arg) {
   waitUntilAccessibilityGranted();
   handleFocusMaybeChanged();
 
+  hookRunLoop = CFRunLoopGetCurrent();
+
   // Start the RunLoop so that our AXObservers added by CFRunLoopAddSource
   // work properly
   CFRunLoopRun();
@@ -660,4 +663,20 @@ void ow_focus_target() {
   AXUIElementSetAttributeValue(app, kAXFrontmostAttribute, kCFBooleanTrue);
   AXUIElementRef window = targetInfo.element;
   AXUIElementSetAttributeValue(window, kAXMainAttribute, kCFBooleanTrue);
+}
+
+void ow_stop_hook() {
+  if (latestTimer) {
+    [latestTimer invalidate];
+    latestTimer = NULL;
+  }
+  clearWindowInfo(targetInfo, windowNotificationTypes);
+  clearWindowInfo(frontmostInfo, appFocusNotificationTypes);
+  NSApplication *app = [NSApplication sharedApplication];
+  if (fullscreenObserver) {
+    [app removeObserver:fullscreenObserver forKeyPath:@"currentSystemPresentationOptions"];
+  }
+  if (hookRunLoop) {
+    CFRunLoopStop(hookRunLoop);
+  }
 }

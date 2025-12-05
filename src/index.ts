@@ -87,14 +87,18 @@ class OverlayControllerGlobal {
       this.targetHasFocus = true
       if (this.electronWindow) {
         this.electronWindow.setIgnoreMouseEvents(true)
+        this.electronWindow.setOpacity(0)
         this.electronWindow.showInactive()
-        this.electronWindow.setAlwaysOnTop(true, 'screen-saver')
+        stackOverlayOnTop(this.electronWindow)
       }
       if (e.isFullscreen !== undefined) {
         this.handleFullscreen(e.isFullscreen)
       }
       this.targetBounds = e
       this.updateOverlayBounds()
+      if (this.electronWindow) {
+        this.electronWindow.setOpacity(1)
+      }
     })
 
     this.events.on('fullscreen', (e: FullscreenEvent) => {
@@ -124,14 +128,17 @@ class OverlayControllerGlobal {
     })
 
     this.events.on('focus', () => {
+      const next = this.focusNext
       this.focusNext = undefined
       this.targetHasFocus = true
 
       if (this.electronWindow) {
-        this.electronWindow.setIgnoreMouseEvents(true)
+        if (next !== 'overlay') {
+          this.electronWindow.setIgnoreMouseEvents(true)
+        }
         if (!this.electronWindow.isVisible()) {
           this.electronWindow.showInactive()
-          this.electronWindow.setAlwaysOnTop(true, 'screen-saver')
+          stackOverlayOnTop(this.electronWindow)
         }
       }
     })
@@ -207,7 +214,8 @@ class OverlayControllerGlobal {
       width: 400,
       height: 300,
       webPreferences: {
-        nodeIntegration: true
+        nodeIntegration: false,
+        contextIsolation: true
       },
       show: false,
     })
@@ -237,6 +245,7 @@ class OverlayControllerGlobal {
     }
     this.focusNext = 'overlay'
     this.electronWindow.setIgnoreMouseEvents(false)
+    stackOverlayOnTop(this.electronWindow)
     if (isLinux) {
       lib.activateOverlay()
     } else {
@@ -289,3 +298,17 @@ class OverlayControllerGlobal {
 }
 
 export const OverlayController = new OverlayControllerGlobal()
+
+export function getAlwaysOnTopLevel (): string | undefined {
+  return isMac ? 'screen-saver' : undefined
+}
+
+export function stackOverlayOnTop (win: BrowserWindow) {
+  const level = getAlwaysOnTopLevel()
+  if (isMac) {
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    win.setAlwaysOnTop(true, level as any)
+  } else {
+    win.setAlwaysOnTop(true)
+  }
+}

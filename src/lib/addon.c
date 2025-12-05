@@ -223,8 +223,12 @@ napi_value AddonScreenshot(napi_env env, napi_callback_info info) {
 }
 
 void AddonCleanUp(void* arg) {
-  // @TODO
-  // UnhookWinEvent(win_event_hhook);
+  if (threadsafe_fn != NULL) {
+    napi_release_threadsafe_function(threadsafe_fn, napi_tsfn_abort);
+    threadsafe_fn = NULL;
+  }
+  ow_stop_hook();
+  uv_thread_join(&hook_tid);
 }
 
 NAPI_MODULE_INIT() {
